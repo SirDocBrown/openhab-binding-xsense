@@ -113,10 +113,18 @@ public class XSenseApiDto {
         /** Security mode of the station, e.g. "Disarmed", "Home" or "Away". */
         public @Nullable String safeMode;
         /** Online state of the station: 1 = online, other values (or null) = offline/unknown. */
-        public @Nullable Integer onLine;
+        // Reported as number, string or boolean, see XSenseDeviceState#connectionFlag
+        public @Nullable JsonElement onLine;
         public @Nullable List<Device> devices;
         /** Display order of {@link #devices} by deviceId, as configured in the X-Sense app. */
         public @Nullable List<String> deviceSort;
+
+        /**
+         * Returns 1 when the station is connected to the cloud, 0 when not and -1 when unknown.
+         */
+        public int online() {
+            return XSenseDeviceState.connectionFlag(onLine);
+        }
     }
 
     /**

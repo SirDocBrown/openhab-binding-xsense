@@ -31,10 +31,10 @@ class XSenseDeviceStateTest {
 
     @Test
     void decodesOnlyTheSelectedDetectorAndReportedValues() throws XSenseApiException {
-        var states = XSenseDeviceState.devices(json("""
+        var states = XSenseStationReport.reported(json("""
                 {"state":{"reported":{"devs":{"A":{"online":"1","batInfo":1,"rfLevel":2,"status":{"alarmStatus":"1"}},
                 "B":{"status":{"alarmStatus":0,"batInfo":"3"},"online":0}}},"desired":{"devs":{"C":{"online":1}}}}}
-                """));
+                """)).getAsJsonObject("devs");
         assertEquals(new XSenseDeviceState(1, 1, 1, 2), XSenseDeviceState.read(states, "A"));
         assertEquals(new XSenseDeviceState(0, 0, 3, -1), XSenseDeviceState.read(states, "B"));
         assertEquals(XSenseDeviceState.UNKNOWN, XSenseDeviceState.read(states, "C"));
@@ -93,9 +93,63 @@ class XSenseDeviceStateTest {
     }
 
     @Test
-    void rejectsDesiredOnlyDocument() {
-        assertThrows(XSenseApiException.class, () -> XSenseDeviceState.devices(json("""
-                {"state":{"desired":{"devs":{}}}}
-                """)));
+    void desiredOnlyDocumentHasNoReportedState() {
+        assertEquals(0, XSenseStationReport.reported(json("""
+                {"state":{"desired":{"devs":{"A":{"online":1,"alarmStatus":1}}}}}
+                """)).size());
+    }
+
+    @Test
+    void decodesOnlineAndOnLineInAllDocumentedRepresentations() {
+        var states = json("""
+                {"A":{"online":1},"B":{"onLine":0},"C":{"onLine":"1"},"D":{"online":"false"},"E":{"onLine":true},
+                "F":{"online":false},"G":{"status":{"onLine":"off"}},"H":{"online":"on"},"I":{"online":2},
+                "J":{"online":"yes"},"K":{"online":1.5},"L":{"batInfo":3},"M":{"online":1,"onLine":0},
+                "N":{"online":1,"status":{"onLine":"0"}},"O":{"online":1.0}}
+                """);
+        assertEquals(1, XSenseDeviceState.read(states, "A").online());
+        assertEquals(0, XSenseDeviceState.read(states, "B").online());
+        assertEquals(1, XSenseDeviceState.read(states, "C").online());
+        assertEquals(0, XSenseDeviceState.read(states, "D").online());
+        assertEquals(1, XSenseDeviceState.read(states, "E").online());
+        assertEquals(0, XSenseDeviceState.read(states, "F").online());
+        assertEquals(0, XSenseDeviceState.read(states, "G").online());
+        assertEquals(1, XSenseDeviceState.read(states, "H").online());
+        assertEquals(-1, XSenseDeviceState.read(states, "I").online());
+        assertEquals(-1, XSenseDeviceState.read(states, "J").online());
+        assertEquals(-1, XSenseDeviceState.read(states, "K").online());
+        assertEquals(-1, XSenseDeviceState.read(states, "L").online());
+        // Contradicting flags in one record: the explicit offline report wins
+        assertEquals(0, XSenseDeviceState.read(states, "M").online());
+        assertEquals(0, XSenseDeviceState.read(states, "N").online());
+        assertEquals(1, XSenseDeviceState.read(states, "O").online());
+    }
+
+    @Test
+    void offlineReportKeepsDecodedValuesForTheHandlerToDiscard() {
+        XSenseDeviceState state = XSenseDeviceState.of(json("""
+                {"onLine":0,"alarmStatus":0}
+                """));
+        assertEquals(0, state.online());
+        assertEquals(0, state.alarm());
+    }
+
+    @Test
+    void decodesBooleanAlarmStatus() {
+        var states = json("""
+                {"A":{"alarmStatus":true},"B":{"status":{"alarmStatus":"false"}},"C":{"isAlarm":true}}
+                """);
+        assertEquals(1, XSenseDeviceState.read(states, "A").alarm());
+        assertEquals(0, XSenseDeviceState.read(states, "B").alarm());
+        assertEquals(1, XSenseDeviceState.read(states, "C").alarm());
+    }
+
+    @Test
+    void mergeCombinesComplementaryRecordsAndRejectsContradictions() {
+        XSenseDeviceState values = new XSenseDeviceState(1, -1, 3, -1);
+        XSenseDeviceState alarm = new XSenseDeviceState(-1, 1, -1, 2);
+        assertEquals(new XSenseDeviceState(1, 1, 3, 2), XSenseDeviceState.merge(values, alarm));
+        assertEquals(values, XSenseDeviceState.merge(values, new XSenseDeviceState(1, -1, 3, -1)));
+        assertNull(XSenseDeviceState.merge(values, new XSenseDeviceState(0, -1, -1, -1)));
     }
 }

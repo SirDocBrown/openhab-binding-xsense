@@ -125,13 +125,22 @@ Please report models that do not work as expected, together with a debug log (se
 
 ## Troubleshooting
 
-To log the raw state that the base station reports for each device, enable debug logging in the openHAB console:
+### Offline States
+
+A sensor is `OFFLINE` when the base station explicitly reports it as disconnected (`online`/`onLine` set to `0` or `false`).
+Values the station still delivers for such a sensor are outdated: its channels are set to `UNDEF` until the station reports the sensor online again.
+When the base station itself is offline, all its sensors are `OFFLINE` (bridge offline) with `UNDEF` channels.
+
+### Debug Log
+
+To analyze how the base station reports its devices, enable debug logging in the openHAB console:
 
 ```shell
 log:set DEBUG org.openhab.binding.xsense
 ```
 
-The log then contains lines like `station <serial>, device <serial> (<model>): {...}` for each poll.
+For each poll the log contains one line per device with its model, the result and the names of expected fields that were not reported, e.g. `station <serial>, model XS01-M: missing rfLevel`.
+The reported device data itself is not logged.
 Restore the default level with `log:set INFO org.openhab.binding.xsense`.
 
 ## Full Example
@@ -179,3 +188,22 @@ end
 
 This binding builds on Markus Michels' [openHAB X-Sense implementation](https://github.com/markus7017/openhab-addons/tree/xsense-pr1/bundles/org.openhab.binding.xsense).
 The [Python X-Sense client](https://github.com/theosnel/python-xsense) and the [Home Assistant integration](https://github.com/Jarnsen/ha-xsense-component_test) document the station shadow and detector values.
+
+## Building
+
+This repository contains the binding module.
+It uses the Maven parent and build conventions of openHAB Add-ons.
+The tested openHAB Add-ons revision is `ef448827d9fff145b86d0662703871129cd4dfc8`.
+With Java 21 and Maven installed, run these commands from this repository:
+
+```sh
+git clone https://github.com/openhab/openhab-addons.git ../xsense-build
+git -C ../xsense-build checkout ef448827d9fff145b86d0662703871129cd4dfc8
+module=../xsense-build/bundles/org.openhab.binding.xsense
+mkdir -p "$module"
+cp -R src pom.xml README.md NOTICE "$module/"
+mvn -f "$module/pom.xml" package
+```
+
+The package build runs the unit tests and writes the binding JAR to the module's `target/` directory.
+The binding uses the HTTP client of the Java 21 runtime and imports no Jetty packages, so the same JAR runs on openHAB 5.3.0.M5 (Jetty 9.4) and on later 5.3.0 snapshots (Jetty 12.1).

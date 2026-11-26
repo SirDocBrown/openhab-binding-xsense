@@ -189,4 +189,45 @@ class XSenseSensorHandlerTest {
         assertEquals(ThingStatus.OFFLINE, status);
         assertEquals(UnDefType.UNDEF, published.get("alarm#smoke"));
     }
+
+    @Test
+    void offlineStateHoldsUntilTheDetectorIsReportedOnlineAgain() {
+        XSenseSensorHandler handler = createHandler(XSenseBindingConstants.THING_TYPE_SMOKE);
+        Device device = new Device();
+
+        device.reported = new XSenseDeviceState(0, 1, 3, 3);
+        handler.updateFromInventory(device);
+        assertEquals(ThingStatus.OFFLINE, status);
+        assertEquals(UnDefType.UNDEF, published.get("alarm#smoke"));
+
+        // Later report without connection flag: the old values must not be published
+        device.reported = new XSenseDeviceState(-1, 1, 3, 3);
+        handler.updateFromInventory(device);
+        assertEquals(ThingStatus.OFFLINE, status);
+        assertEquals(UnDefType.UNDEF, published.get("alarm#smoke"));
+
+        // No report at all in this poll
+        device.reported = XSenseDeviceState.UNKNOWN;
+        handler.updateFromInventory(device);
+        assertEquals(ThingStatus.OFFLINE, status);
+
+        device.reported = new XSenseDeviceState(1, 0, 3, 3);
+        handler.updateFromInventory(device);
+        assertEquals(ThingStatus.ONLINE, status);
+        assertEquals(OnOffType.OFF, published.get("alarm#smoke"));
+    }
+
+    @Test
+    void stationOfflineMakesTheDetectorOfflineWithUndefinedChannels() {
+        XSenseSensorHandler handler = createHandler(XSenseBindingConstants.THING_TYPE_SMOKE);
+        Device device = new Device();
+        device.reported = new XSenseDeviceState(1, 1, 3, 3);
+        handler.updateFromInventory(device);
+        assertEquals(OnOffType.ON, published.get("alarm#smoke"));
+
+        handler.stationOffline();
+        assertEquals(ThingStatus.OFFLINE, status);
+        assertEquals(UnDefType.UNDEF, published.get("alarm#smoke"));
+        assertEquals(UnDefType.UNDEF, published.get("device#lowBattery"));
+    }
 }

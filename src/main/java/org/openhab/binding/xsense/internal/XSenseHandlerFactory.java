@@ -18,43 +18,53 @@ import java.util.Map;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
-import org.eclipse.jetty.client.HttpClient;
+import org.openhab.binding.xsense.internal.api.XSenseJavaHttpTransport;
 import org.openhab.binding.xsense.internal.config.XSenseBindingConfiguration;
 import org.openhab.binding.xsense.internal.handler.XSenseAccountHandler;
 import org.openhab.binding.xsense.internal.handler.XSenseHomeHandler;
 import org.openhab.binding.xsense.internal.handler.XSenseSensorHandler;
 import org.openhab.binding.xsense.internal.handler.XSenseStationHandler;
-import org.openhab.core.io.net.http.HttpClientFactory;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingTypeUID;
 import org.openhab.core.thing.binding.BaseThingHandlerFactory;
 import org.openhab.core.thing.binding.ThingHandler;
 import org.openhab.core.thing.binding.ThingHandlerFactory;
+import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
+import org.osgi.service.component.annotations.Deactivate;
 import org.osgi.service.component.annotations.Modified;
-import org.osgi.service.component.annotations.Reference;
 
 /**
  * The {@link XSenseHandlerFactory} is responsible for creating things and thing
  * handlers.
  *
  * @author Markus Michels - Initial contribution
- * @author Andreas Rothstein - Use the shared openHAB HTTP client
+ * @author Andreas Rothstein - Java HTTP client independent of the runtime's Jetty version
  */
 @NonNullByDefault
 @Component(configurationPid = "binding.xsense", service = ThingHandlerFactory.class)
 public class XSenseHandlerFactory extends BaseThingHandlerFactory {
 
-    private final HttpClient httpClient;
+    // Java 21 HTTP client owned by this factory: the binding must not import Jetty packages, as the
+    // Jetty version differs between openHAB releases (e.g. 9.4 in 5.3.0.M5, 12.1 in later snapshots)
+    private final XSenseJavaHttpTransport transport;
     // Volatile for safe publication after @Modified callbacks
     private volatile XSenseBindingConfiguration bindingConfig = new XSenseBindingConfiguration();
 
     @Activate
-    public XSenseHandlerFactory(@Reference HttpClientFactory httpClientFactory, Map<String, Object> properties) {
-        httpClient = httpClientFactory.getCommonHttpClient();
+    public XSenseHandlerFactory(Map<String, Object> properties) {
+        transport = new XSenseJavaHttpTransport();
         bindingConfig = XSenseBindingConfiguration.fromConfig(properties);
+    }
+
+    @Override
+    @Deactivate
+    protected void deactivate(ComponentContext componentContext) {
+        super.deactivate(componentContext);
+        // Handlers are disposed by now; release the connection pool and the selector thread
+        transport.close();
     }
 
     @Modified
@@ -73,7 +83,7 @@ public class XSenseHandlerFactory extends BaseThingHandlerFactory {
 
         if (THING_TYPE_ACCOUNT.equals(thingTypeUID)) {
             // Supplier so that later binding configuration changes reach existing handlers
-            return new XSenseAccountHandler((Bridge) thing, httpClient, () -> bindingConfig.refreshInterval);
+            return new XSenseAccountHandler((Bridge) thing, transport, () -> bindingConfig.refreshInterval);
         } else if (THING_TYPE_HOME.equals(thingTypeUID)) {
             return new XSenseHomeHandler((Bridge) thing);
         } else if (THING_TYPE_STATION.equals(thingTypeUID)) {
