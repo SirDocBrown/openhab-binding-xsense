@@ -5,14 +5,6 @@
 	xsi:schemaLocation="https://openhab.org/schemas/thing-description/v1.0.0 https://openhab.org/schemas/thing-description-1.0.0.xsd">
 
 	<!-- Channel Group Types -->
-	<channel-group-type id="info">
-		<label>Information</label>
-		<description>General information about the device and its place in the account hierarchy.</description>
-		<channels>
-			<channel id="path" typeId="path"/>
-		</channels>
-	</channel-group-type>
-
 	<channel-group-type id="device">
 		<label>Device Status</label>
 		<description>General device status information.</description>
@@ -40,14 +32,6 @@
 	</channel-group-type>
 
 	<!-- Channel Types -->
-	<channel-type id="path" advanced="true">
-		<item-type>String</item-type>
-		<label>Hierarchy Path</label>
-		<description>JSON describing where this thing belongs in the account/home/station/device hierarchy, e.g.
-			{"account":"a@b.c","home":{"id":"h1","name":"Home"},"station":{"sn":"SN1","name":"Hall"}}.</description>
-		<state readOnly="true"/>
-	</channel-type>
-
 	<channel-type id="signal">
 		<item-type>Number</item-type>
 		<label>Signal Strength</label>
