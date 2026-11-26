@@ -63,8 +63,9 @@ class XSenseApiClientSessionTest {
 
         XSenseApiException error = assertThrows(XSenseApiException.class, client::getHouses);
         assertFalse(error.isAuthenticationFailure());
-        assertEquals(List.of("cognito:InitiateAuth/refresh", "cognito:InitiateAuth/srp",
-                "cognito:RespondToAuthChallenge"), cloud.endpoints());
+        assertEquals(
+                List.of("cognito:InitiateAuth/refresh", "cognito:InitiateAuth/srp", "cognito:RespondToAuthChallenge"),
+                cloud.endpoints());
         assertTrue(client.isLoggedIn());
         cloud.clearCalls();
 
@@ -103,8 +104,8 @@ class XSenseApiClientSessionTest {
             "{\"AuthenticationResult\":{\"AccessToken\":\"a\",\"ExpiresIn\":60}}",
             "{\"AuthenticationResult\":{\"AccessToken\":\"a\",\"ExpiresIn\":86401}}",
             "{\"AuthenticationResult\":{\"AccessToken\":\"a\",\"ExpiresIn\":9223372036854775808}}",
-            "{\"AuthenticationResult\":{\"AccessToken\":\"a\",\"ExpiresIn\":1e400}}",
-            "{\"AuthenticationResult\":[]}", "[]", "\"text\"", "not json" })
+            "{\"AuthenticationResult\":{\"AccessToken\":\"a\",\"ExpiresIn\":1e400}}", "{\"AuthenticationResult\":[]}",
+            "[]", "\"text\"", "not json" })
     void invalidAuthenticationResultIsRejectedBeforeTheSessionIsTakenOver(String response) {
         cloud.set("cognito:RespondToAuthChallenge", ok(response));
         assertThrows(XSenseApiException.class, () -> client.login("user@example.invalid", "password"));
@@ -124,19 +125,22 @@ class XSenseApiClientSessionTest {
     @Test
     void forbiddenThenRenewedCredentialsThenNotFoundStillFallsBackToMainpage() throws XSenseApiException {
         login();
-        cloud.then("api:101003", api("""
-                {"accessKeyId":"ASIAFIRST","secretAccessKey":"s1","sessionToken":"token-1","expiration":"2099-01-01 00:00:00+00:00"}
-                """), api("""
-                {"accessKeyId":"ASIASECOND","secretAccessKey":"s2","sessionToken":"token-2","expiration":"2099-01-01 00:00:00+00:00"}
-                """));
+        cloud.then("api:101003",
+                api("""
+                        {"accessKeyId":"ASIAFIRST","secretAccessKey":"s1","sessionToken":"token-1","expiration":"2099-01-01 00:00:00+00:00"}
+                        """),
+                api("""
+                        {"accessKeyId":"ASIASECOND","secretAccessKey":"s2","sessionToken":"token-2","expiration":"2099-01-01 00:00:00+00:00"}
+                        """));
         cloud.then("shadow:2nd_mainpage", status(403), status(404));
         cloud.set("shadow:mainpage", shadow("{\"devs\":{\"SN\":{\"alarmStatus\":\"0\"}}}"));
 
         JsonObject reported = client.getDeviceStates(REGION, STATION_SN);
 
         assertTrue(reported.has("devs"));
-        assertEquals(List.of("api:101003", "shadow:2nd_mainpage", "api:101003", "shadow:2nd_mainpage",
-                "shadow:mainpage"), cloud.endpoints());
+        assertEquals(
+                List.of("api:101003", "shadow:2nd_mainpage", "api:101003", "shadow:2nd_mainpage", "shadow:mainpage"),
+                cloud.endpoints());
         List<FakeXSenseCloud.Call> calls = cloud.calls();
         assertEquals("token-1", calls.get(1).headers().get("X-Amz-Security-Token"));
         assertEquals("token-2", calls.get(3).headers().get("X-Amz-Security-Token"));

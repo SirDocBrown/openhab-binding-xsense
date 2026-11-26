@@ -74,8 +74,8 @@ public class XSenseJavaHttpTransport implements XSenseHttpTransport, AutoCloseab
             throws XSenseApiException {
         HttpRequest request;
         try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url)).timeout(requestTimeout)
-                    .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
+            HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url)).timeout(requestTimeout).method(method,
+                    body == null ? HttpRequest.BodyPublishers.noBody()
                             : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
             headers.forEach((name, value) -> {
                 if (!MANAGED_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {

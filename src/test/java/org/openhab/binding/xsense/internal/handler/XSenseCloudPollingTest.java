@@ -126,8 +126,8 @@ class XSenseCloudPollingTest {
                 Map.of("email", "user@example.invalid", "password", "password"), null);
         Bridge homeThing = (Bridge) thing(mock(Bridge.class), HOME_UID, XSenseBindingConstants.THING_TYPE_HOME,
                 Map.of("houseId", HOUSE_ID), ACCOUNT_UID);
-        Bridge stationThing = (Bridge) thing(mock(Bridge.class), STATION_UID,
-                XSenseBindingConstants.THING_TYPE_STATION, Map.of("stationSn", STATION_SN), HOME_UID);
+        Bridge stationThing = (Bridge) thing(mock(Bridge.class), STATION_UID, XSenseBindingConstants.THING_TYPE_STATION,
+                Map.of("stationSn", STATION_SN), HOME_UID);
         Thing smokeA = thing(mock(Thing.class), SMOKE_A_UID, XSenseBindingConstants.THING_TYPE_SMOKE,
                 Map.of("deviceSn", SN_A), STATION_UID);
         Thing smokeB = thing(mock(Thing.class), SMOKE_B_UID, XSenseBindingConstants.THING_TYPE_SMOKE,

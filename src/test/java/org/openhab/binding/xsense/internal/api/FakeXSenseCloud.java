@@ -169,8 +169,8 @@ public class FakeXSenseCloud implements XSenseHttpTransport {
 
     /** Cognito authentication result with raw JSON values for all fields. */
     public static String rawAuthResult(String accessTokenJson, String refreshTokenJson, String expiresInJson) {
-        return "{\"AuthenticationResult\":{\"AccessToken\":" + accessTokenJson + ",\"RefreshToken\":"
-                + refreshTokenJson + ",\"ExpiresIn\":" + expiresInJson + "}}";
+        return "{\"AuthenticationResult\":{\"AccessToken\":" + accessTokenJson + ",\"RefreshToken\":" + refreshTokenJson
+                + ",\"ExpiresIn\":" + expiresInJson + "}}";
     }
 
     /** Station list of {@link #HOUSE_ID} with one SBS50 and the given children (deviceSn, deviceId). */
@@ -180,8 +180,8 @@ public class FakeXSenseCloud implements XSenseHttpTransport {
             if (devices.length() > 0) {
                 devices.append(',');
             }
-            devices.append("{\"deviceSn\":\"").append(children[i]).append("\",\"deviceId\":\"")
-                    .append(children[i + 1]).append("\",\"deviceType\":\"XS01-M\",\"deviceName\":\"Detector\"}");
+            devices.append("{\"deviceSn\":\"").append(children[i]).append("\",\"deviceId\":\"").append(children[i + 1])
+                    .append("\",\"deviceType\":\"XS01-M\",\"deviceName\":\"Detector\"}");
         }
         return api("{\"stations\":[{\"stationSn\":\"" + STATION_SN + "\",\"category\":\"SBS50\",\"onLine\":"
                 + stationOnline + ",\"devices\":[" + devices + "]}]}");
