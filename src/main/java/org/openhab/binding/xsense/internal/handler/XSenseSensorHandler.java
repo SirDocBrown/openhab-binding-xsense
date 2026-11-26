@@ -14,6 +14,7 @@ package org.openhab.binding.xsense.internal.handler;
 
 import static org.openhab.binding.xsense.internal.XSenseBindingConstants.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,24 +26,29 @@ import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Device;
 import org.openhab.binding.xsense.internal.config.XSenseDeviceConfiguration;
 import org.openhab.core.library.types.DecimalType;
 import org.openhab.core.library.types.OnOffType;
+import org.openhab.core.library.types.OpenClosedType;
+import org.openhab.core.library.types.QuantityType;
+import org.openhab.core.library.unit.Units;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
 import org.openhab.core.thing.ThingStatusInfo;
+import org.openhab.core.thing.ThingTypeUID;
 import org.openhab.core.thing.binding.BaseThingHandler;
 import org.openhab.core.types.Command;
 import org.openhab.core.types.RefreshType;
+import org.openhab.core.types.State;
 import org.openhab.core.types.UnDefType;
 
 /**
- * The {@link XSenseSensorHandler} represents a smoke or water leak detector attached to an X-Sense
- * base station. It maintains the thing status and properties from the inventory and the measurements
- * from the reported state of the station.
+ * The {@link XSenseSensorHandler} represents a detector or sensor (smoke, CO, combined smoke/CO, heat,
+ * water leak, door contact, motion) attached to an X-Sense base station. It maintains the thing status
+ * and properties from the inventory and the measurements from the reported state of the station.
  *
  * @author Markus Michels - Initial contribution
- * @author Andreas Rothstein - Detector measurements
+ * @author Andreas Rothstein - Detector measurements, CO, heat, door and motion sensors
  */
 @NonNullByDefault
 public class XSenseSensorHandler extends BaseThingHandler {
@@ -126,21 +132,73 @@ public class XSenseSensorHandler extends BaseThingHandler {
             updateStatus(ThingStatus.UNKNOWN);
             return;
         }
-        updateState(alarmChannel(), report.alarm() < 0 ? UnDefType.UNDEF : OnOffType.from(report.alarm() > 0));
+        String alarmChannel = alarmChannel();
+        if (alarmChannel != null) {
+            updateState(alarmChannel, onOff(report.alarm()));
+        }
         int battery = report.battery();
         updateState(CHANNEL_BATTERY,
                 battery < 0 ? UnDefType.UNDEF : new DecimalType(Math.round(battery * 100f / MAX_BATTERY_LEVEL)));
         updateState(CHANNEL_LOW_BATTERY, battery < 0 ? UnDefType.UNDEF : OnOffType.from(battery <= LOW_BATTERY_LEVEL));
         updateState(CHANNEL_SIGNAL, report.signal() < 0 ? UnDefType.UNDEF : new DecimalType(report.signal()));
+        ThingTypeUID thingTypeUID = getThing().getThingTypeUID();
+        if (hasCoLevel(thingTypeUID)) {
+            updateState(CHANNEL_CO_LEVEL, ppm(report.coPpm()));
+            updateState(CHANNEL_CO_PEAK, ppm(report.coPeak()));
+        }
+        if (THING_TYPE_DOOR.equals(thingTypeUID)) {
+            int open = report.open();
+            updateState(CHANNEL_CONTACT,
+                    open < 0 ? UnDefType.UNDEF : open > 0 ? OpenClosedType.OPEN : OpenClosedType.CLOSED);
+        } else if (THING_TYPE_MOTION.equals(thingTypeUID)) {
+            updateState(CHANNEL_MOTION, onOff(report.motion()));
+        }
         updateStatus(report.online() == 1 ? ThingStatus.ONLINE : ThingStatus.UNKNOWN);
     }
 
-    private String alarmChannel() {
-        return THING_TYPE_WATER.equals(getThing().getThingTypeUID()) ? CHANNEL_ALARM_WATER : CHANNEL_ALARM_SMOKE;
+    /**
+     * Returns the alarm channel of this detector type, or null for sensors without an alarm channel.
+     */
+    private @Nullable String alarmChannel() {
+        return switch (getThing().getThingTypeUID().getId()) {
+            case "smoke" -> CHANNEL_ALARM_SMOKE;
+            case "water" -> CHANNEL_ALARM_WATER;
+            case "co" -> CHANNEL_ALARM_CO;
+            case "combo" -> CHANNEL_ALARM_COMBO;
+            case "heat" -> CHANNEL_ALARM_HEAT;
+            default -> null;
+        };
+    }
+
+    private static boolean hasCoLevel(ThingTypeUID thingTypeUID) {
+        return THING_TYPE_CO.equals(thingTypeUID) || THING_TYPE_COMBO.equals(thingTypeUID);
+    }
+
+    private static State onOff(int flag) {
+        return flag < 0 ? UnDefType.UNDEF : OnOffType.from(flag > 0);
+    }
+
+    private static State ppm(int value) {
+        return value < 0 ? UnDefType.UNDEF : new QuantityType<>(value, Units.PARTS_PER_MILLION);
     }
 
     private void clearMeasurements() {
-        for (String channel : List.of(alarmChannel(), CHANNEL_BATTERY, CHANNEL_LOW_BATTERY, CHANNEL_SIGNAL)) {
+        ThingTypeUID thingTypeUID = getThing().getThingTypeUID();
+        List<String> channels = new ArrayList<>(List.of(CHANNEL_BATTERY, CHANNEL_LOW_BATTERY, CHANNEL_SIGNAL));
+        String alarmChannel = alarmChannel();
+        if (alarmChannel != null) {
+            channels.add(alarmChannel);
+        }
+        if (hasCoLevel(thingTypeUID)) {
+            channels.add(CHANNEL_CO_LEVEL);
+            channels.add(CHANNEL_CO_PEAK);
+        }
+        if (THING_TYPE_DOOR.equals(thingTypeUID)) {
+            channels.add(CHANNEL_CONTACT);
+        } else if (THING_TYPE_MOTION.equals(thingTypeUID)) {
+            channels.add(CHANNEL_MOTION);
+        }
+        for (String channel : channels) {
             updateState(channel, UnDefType.UNDEF);
         }
     }

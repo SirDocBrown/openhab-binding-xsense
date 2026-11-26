@@ -31,6 +31,55 @@
 		</channels>
 	</channel-group-type>
 
+	<channel-group-type id="alarm-co">
+		<label>Alarm</label>
+		<description>Alarm status of the detector.</description>
+		<channels>
+			<channel id="co" typeId="co-alarm"/>
+		</channels>
+	</channel-group-type>
+
+	<channel-group-type id="alarm-combo">
+		<label>Alarm</label>
+		<description>Alarm status of the detector.</description>
+		<channels>
+			<channel id="alarm" typeId="combo-alarm"/>
+		</channels>
+	</channel-group-type>
+
+	<channel-group-type id="alarm-heat">
+		<label>Alarm</label>
+		<description>Alarm status of the detector.</description>
+		<channels>
+			<channel id="heat" typeId="heat-alarm"/>
+		</channels>
+	</channel-group-type>
+
+	<channel-group-type id="measurement-co">
+		<label>Measurement</label>
+		<description>Carbon monoxide concentration measured by the detector.</description>
+		<channels>
+			<channel id="co" typeId="co-level"/>
+			<channel id="coPeak" typeId="co-peak"/>
+		</channels>
+	</channel-group-type>
+
+	<channel-group-type id="state-door">
+		<label>State</label>
+		<description>State of the sensor.</description>
+		<channels>
+			<channel id="contact" typeId="door-contact"/>
+		</channels>
+	</channel-group-type>
+
+	<channel-group-type id="state-motion">
+		<label>State</label>
+		<description>State of the sensor.</description>
+		<channels>
+			<channel id="motion" typeId="motion"/>
+		</channels>
+	</channel-group-type>
+
 	<!-- Channel Types -->
 	<channel-type id="signal">
 		<item-type>Number</item-type>
@@ -64,6 +113,90 @@
 		<tags>
 			<tag>Alarm</tag>
 			<tag>Water</tag>
+		</tags>
+		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="co-alarm">
+		<item-type>Switch</item-type>
+		<label>CO Alarm</label>
+		<description>Indicates whether the detector reports a carbon monoxide alarm.</description>
+		<category>Alarm</category>
+		<tags>
+			<tag>Alarm</tag>
+			<tag>CO</tag>
+		</tags>
+		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="combo-alarm">
+		<item-type>Switch</item-type>
+		<label>Alarm</label>
+		<description>Indicates whether the detector reports a smoke or carbon monoxide alarm.</description>
+		<category>Alarm</category>
+		<tags>
+			<tag>Alarm</tag>
+			<tag>Smoke</tag>
+		</tags>
+		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="heat-alarm">
+		<item-type>Switch</item-type>
+		<label>Heat Alarm</label>
+		<description>Indicates whether the detector reports a heat alarm.</description>
+		<category>Fire</category>
+		<tags>
+			<tag>Alarm</tag>
+			<tag>Temperature</tag>
+		</tags>
+		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="co-level">
+		<item-type unitHint="ppm">Number:Dimensionless</item-type>
+		<label>CO Concentration</label>
+		<description>Current carbon monoxide concentration.</description>
+		<category>CarbonDioxide</category>
+		<tags>
+			<tag>Measurement</tag>
+			<tag>CO</tag>
+		</tags>
+		<state readOnly="true" pattern="%d %unit%"/>
+	</channel-type>
+
+	<channel-type id="co-peak" advanced="true">
+		<item-type unitHint="ppm">Number:Dimensionless</item-type>
+		<label>CO Peak Concentration</label>
+		<description>Highest carbon monoxide concentration recorded by the detector.</description>
+		<category>CarbonDioxide</category>
+		<tags>
+			<tag>Measurement</tag>
+			<tag>CO</tag>
+		</tags>
+		<state readOnly="true" pattern="%d %unit%"/>
+	</channel-type>
+
+	<channel-type id="door-contact">
+		<item-type>Contact</item-type>
+		<label>Contact</label>
+		<description>Indicates whether the door or window is open.</description>
+		<category>Door</category>
+		<tags>
+			<tag>OpenState</tag>
+			<tag>Opening</tag>
+		</tags>
+		<state readOnly="true"/>
+	</channel-type>
+
+	<channel-type id="motion">
+		<item-type>Switch</item-type>
+		<label>Motion</label>
+		<description>Indicates whether the sensor detects motion.</description>
+		<category>Motion</category>
+		<tags>
+			<tag>Status</tag>
+			<tag>Motion</tag>
 		</tags>
 		<state readOnly="true"/>
 	</channel-type>

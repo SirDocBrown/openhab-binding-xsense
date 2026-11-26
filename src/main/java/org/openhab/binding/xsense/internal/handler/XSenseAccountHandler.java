@@ -334,9 +334,13 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
         }
         try {
             var states = apiClient.getDeviceStates(region, serial);
+            logger.debug("{}: station {} reports state for device(s) {}", logId(), serial, states.keySet());
             for (Device device : devices) {
                 String deviceSerial = device.deviceSn;
                 if (deviceSerial != null) {
+                    // Raw device state as reported by the station, needed to add support for further models
+                    logger.debug("{}: station {}, device {} ({}): {}", logId(), serial, deviceSerial, device.deviceType,
+                            states.get(deviceSerial));
                     device.reported = XSenseDeviceState.read(states, deviceSerial);
                 }
             }

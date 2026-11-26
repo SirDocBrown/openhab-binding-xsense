@@ -26,7 +26,13 @@ public class XSenseBindingConstantsTest {
         assertEquals(THING_TYPE_SMOKE, thingTypeForDeviceType("XS01-M"));
         assertEquals(THING_TYPE_SMOKE, thingTypeForDeviceType("XS0B-MR"));
         assertEquals(THING_TYPE_WATER, thingTypeForDeviceType("SWS51"));
-        assertEquals(THING_TYPE_WATER, thingTypeForDeviceType("SWS54"));
+        assertEquals(THING_TYPE_WATER, thingTypeForDeviceType("SWS0A"));
+        assertEquals(THING_TYPE_CO, thingTypeForDeviceType("XC01-M"));
+        assertEquals(THING_TYPE_CO, thingTypeForDeviceType("XC0C-MR"));
+        assertEquals(THING_TYPE_COMBO, thingTypeForDeviceType("SC07-MR"));
+        assertEquals(THING_TYPE_HEAT, thingTypeForDeviceType("XH02-M"));
+        assertEquals(THING_TYPE_DOOR, thingTypeForDeviceType("SDS0A"));
+        assertEquals(THING_TYPE_MOTION, thingTypeForDeviceType("SMS0A"));
     }
 
     @Test
@@ -37,11 +43,11 @@ public class XSenseBindingConstantsTest {
     }
 
     @Test
-    public void deviceTypesPlannedForFollowUpReleaseAreNotYetSupported() {
-        assertNull(thingTypeForDeviceType("XC01-M"));
-        assertNull(thingTypeForDeviceType("SC07-MR"));
-        assertNull(thingTypeForDeviceType("XH02-M"));
+    public void wifiDevicesAndThermoHygrometersAreNotYetSupported() {
         assertNull(thingTypeForDeviceType("STH51"));
+        assertNull(thingTypeForDeviceType("XS01-WX"));
+        assertNull(thingTypeForDeviceType("XC04-WX"));
+        assertNull(thingTypeForDeviceType("SWS54"));
     }
 
     @Test
