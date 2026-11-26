@@ -60,6 +60,9 @@ Discovery imports the account tree progressively, starting automatically as soon
 1. Once a `home` thing has been added, its base stations and their sensors appear.
    Add the base station before its sensors.
 
+Discovered things are labeled with the names given in the X-Sense app.
+Devices without a name are labeled with model and serial number, e.g. `XC01-M 0000000C`.
+
 Each inventory poll re-publishes all levels whose home thing already exists, so after approving a home the next level appears without a manual rescan.
 Unsupported device models are logged on debug level, please report them so support can be added.
 

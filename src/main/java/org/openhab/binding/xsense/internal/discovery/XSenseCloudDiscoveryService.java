@@ -154,7 +154,7 @@ public class XSenseCloudDiscoveryService extends AbstractThingHandlerDiscoverySe
         putIfPresent(properties, PROPERTY_HOUSE_NAME, houseName);
 
         ThingUID homeUID = new ThingUID(THING_TYPE_HOME, accountUID, houseId);
-        String label = "@text/discovery.home.label [ \"%s\" ]".formatted(XSenseDtoUtil.orDefault(houseName, houseId));
+        String label = homeLabel(houseName, houseId);
         thingDiscovered(DiscoveryResultBuilder.create(homeUID).withBridge(accountUID).withLabel(label)
                 .withProperties(properties).withRepresentationProperty(CONFIG_HOUSE_ID).build());
     }
@@ -178,17 +178,15 @@ public class XSenseCloudDiscoveryService extends AbstractThingHandlerDiscoverySe
         putIfPresent(properties, Thing.PROPERTY_MODEL_ID, category);
         String houseName = house.houseName;
         putIfPresent(properties, PROPERTY_HOUSE_NAME, houseName);
-        String homeName = XSenseDtoUtil.orDefault(houseName, houseId);
 
         ThingUID stationUID = new ThingUID(THING_TYPE_STATION, homeUID, stationSn);
         String stationName = station.stationName;
         String modelId = XSenseDtoUtil.orDefault(category, STATION_TYPE_SBS50);
-        String label = "@text/discovery.station.label [ \"%s\", \"%s\", \"%s\" ]".formatted(homeName,
-                XSenseDtoUtil.orDefault(stationName, stationSn), modelId);
+        String label = stationLabel(stationName, modelId, stationSn);
         thingDiscovered(DiscoveryResultBuilder.create(stationUID).withBridge(homeUID).withLabel(label)
                 .withProperties(properties).withRepresentationProperty(Thing.PROPERTY_SERIAL_NUMBER).build());
 
-        publishDevices(homeName, station, stationUID);
+        publishDevices(station, stationUID);
     }
 
     /**
@@ -196,7 +194,7 @@ public class XSenseCloudDiscoveryService extends AbstractThingHandlerDiscoverySe
      * itself (see {@link #publishStation}) rather than gated behind the station thing being added,
      * so approving a home surfaces its whole station + sensor tree in one discovery step.
      */
-    private void publishDevices(String homeName, Station station, ThingUID stationUID) {
+    private void publishDevices(Station station, ThingUID stationUID) {
         String logId = "xsense-" + station.stationSn;
         List<Device> devices = station.devices;
         if (devices == null || devices.isEmpty()) {
@@ -224,12 +222,31 @@ public class XSenseCloudDiscoveryService extends AbstractThingHandlerDiscoverySe
             putIfPresent(properties, PROPERTY_ROOM_NAME, device.roomName);
 
             String deviceName = device.deviceName;
-            String label = "@text/discovery.device.label [ \"%s\", \"%s\", \"%s\" ]".formatted(homeName,
-                    XSenseDtoUtil.orDefault(deviceName, deviceSn), deviceType);
+            String label = deviceLabel(deviceName, deviceType, deviceSn);
             thingDiscovered(DiscoveryResultBuilder.create(new ThingUID(thingTypeUID, stationUID, deviceSn))
                     .withBridge(stationUID).withLabel(label).withProperties(properties)
                     .withRepresentationProperty(Thing.PROPERTY_SERIAL_NUMBER).build());
         }
+    }
+
+    /**
+     * Discovery labels are plain text: the name given in the X-Sense app, as it is shown in the inbox
+     * and taken over as thing label. Without a name, model and serial number identify the device.
+     */
+    static String deviceLabel(@Nullable String deviceName, String model, String serial) {
+        return nameOr(deviceName, model + " " + serial);
+    }
+
+    static String stationLabel(@Nullable String stationName, String model, String serial) {
+        return nameOr(stationName, model + " " + serial);
+    }
+
+    static String homeLabel(@Nullable String houseName, String houseId) {
+        return nameOr(houseName, "X-Sense Home " + houseId);
+    }
+
+    private static String nameOr(@Nullable String name, String fallback) {
+        return name != null && !name.isBlank() ? name.strip() : fallback;
     }
 
     /**
