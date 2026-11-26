@@ -69,10 +69,13 @@ public class XSenseBindingConstants {
     public static final String PROPERTY_HOUSE_ID = "houseId";
     public static final String PROPERTY_HOUSE_NAME = "houseName";
     public static final String PROPERTY_ROOM_NAME = "roomName";
-    public static final String PROPERTY_UNIQUE_ID = "uniqueId";
 
-    // Channels
-    public static final String CHANNEL_PATH = "info#path";
+    // Channels of the sensor things
+    public static final String CHANNEL_ALARM_SMOKE = "alarm#smoke";
+    public static final String CHANNEL_ALARM_WATER = "alarm#water";
+    public static final String CHANNEL_BATTERY = "device#battery";
+    public static final String CHANNEL_LOW_BATTERY = "device#lowBattery";
+    public static final String CHANNEL_SIGNAL = "device#signal";
 
     /**
      * Returns the thing type for an X-Sense model code or null for unsupported models.

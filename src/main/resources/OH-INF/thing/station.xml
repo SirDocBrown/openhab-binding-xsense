@@ -14,10 +14,6 @@
 			cloud.</description>
 		<semantic-equipment-tag>AlarmSystem</semantic-equipment-tag>
 
-		<channel-groups>
-			<channel-group id="info" typeId="info"/>
-		</channel-groups>
-
 		<representation-property>serialNumber</representation-property>
 
 		<config-description-ref uri="thing-type:xsense:station"/>

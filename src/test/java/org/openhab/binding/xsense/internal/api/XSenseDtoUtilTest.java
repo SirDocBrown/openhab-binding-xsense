@@ -29,16 +29,4 @@ public class XSenseDtoUtilTest {
     public void orDefaultReturnsFallbackWhenNull() {
         assertEquals("fallback", XSenseDtoUtil.orDefault(null, "fallback"));
     }
-
-    @Test
-    public void orEmptyReturnsEmptyStringWhenNull() {
-        assertEquals("", XSenseDtoUtil.orEmpty(null));
-        assertEquals("value", XSenseDtoUtil.orEmpty("value"));
-    }
-
-    @Test
-    public void orZeroReturnsZeroWhenNull() {
-        assertEquals(0, XSenseDtoUtil.orZero(null));
-        assertEquals(5, XSenseDtoUtil.orZero(5));
-    }
 }

@@ -13,10 +13,6 @@
 		<description>A home (house) registered in the X-Sense account, grouping its base stations and
 			sensors.</description>
 
-		<channel-groups>
-			<channel-group id="info" typeId="info"/>
-		</channel-groups>
-
 		<representation-property>houseId</representation-property>
 
 		<config-description-ref uri="thing-type:xsense:home"/>

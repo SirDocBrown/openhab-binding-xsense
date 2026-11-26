@@ -14,29 +14,25 @@ package org.openhab.binding.xsense.internal;
 
 import static org.openhab.binding.xsense.internal.XSenseBindingConstants.*;
 
-import java.net.http.HttpClient;
-import java.time.Duration;
 import java.util.Map;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.eclipse.jetty.client.HttpClient;
 import org.openhab.binding.xsense.internal.config.XSenseBindingConfiguration;
 import org.openhab.binding.xsense.internal.handler.XSenseAccountHandler;
 import org.openhab.binding.xsense.internal.handler.XSenseHomeHandler;
 import org.openhab.binding.xsense.internal.handler.XSenseSensorHandler;
 import org.openhab.binding.xsense.internal.handler.XSenseStationHandler;
-import org.openhab.core.i18n.LocaleProvider;
-import org.openhab.core.i18n.TranslationProvider;
+import org.openhab.core.io.net.http.HttpClientFactory;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingTypeUID;
 import org.openhab.core.thing.binding.BaseThingHandlerFactory;
 import org.openhab.core.thing.binding.ThingHandler;
 import org.openhab.core.thing.binding.ThingHandlerFactory;
-import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
-import org.osgi.service.component.annotations.Deactivate;
 import org.osgi.service.component.annotations.Modified;
 import org.osgi.service.component.annotations.Reference;
 
@@ -45,31 +41,20 @@ import org.osgi.service.component.annotations.Reference;
  * handlers.
  *
  * @author Markus Michels - Initial contribution
+ * @author Andreas Rothstein - Use the shared openHAB HTTP client
  */
 @NonNullByDefault
 @Component(configurationPid = "binding.xsense", service = ThingHandlerFactory.class)
 public class XSenseHandlerFactory extends BaseThingHandlerFactory {
 
     private final HttpClient httpClient;
-    private final TranslationProvider i18nProvider;
-    private final LocaleProvider localeProvider;
     // Volatile for safe publication after @Modified callbacks
     private volatile XSenseBindingConfiguration bindingConfig = new XSenseBindingConfiguration();
 
     @Activate
-    public XSenseHandlerFactory(@Reference TranslationProvider i18nProvider, @Reference LocaleProvider localeProvider,
-            Map<String, Object> properties) {
-        httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
-        this.i18nProvider = i18nProvider;
-        this.localeProvider = localeProvider;
+    public XSenseHandlerFactory(@Reference HttpClientFactory httpClientFactory, Map<String, Object> properties) {
+        httpClient = httpClientFactory.getCommonHttpClient();
         bindingConfig = XSenseBindingConfiguration.fromConfig(properties);
-    }
-
-    @Override
-    @Deactivate
-    protected void deactivate(ComponentContext context) {
-        super.deactivate(context);
-        httpClient.close();
     }
 
     @Modified
@@ -88,8 +73,7 @@ public class XSenseHandlerFactory extends BaseThingHandlerFactory {
 
         if (THING_TYPE_ACCOUNT.equals(thingTypeUID)) {
             // Supplier so that later binding configuration changes reach existing handlers
-            return new XSenseAccountHandler((Bridge) thing, httpClient, () -> bindingConfig, i18nProvider,
-                    localeProvider);
+            return new XSenseAccountHandler((Bridge) thing, httpClient, () -> bindingConfig.refreshInterval);
         } else if (THING_TYPE_HOME.equals(thingTypeUID)) {
             return new XSenseHomeHandler((Bridge) thing);
         } else if (THING_TYPE_STATION.equals(thingTypeUID)) {

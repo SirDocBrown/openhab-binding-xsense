@@ -62,8 +62,7 @@ public class XSenseApiDto {
     }
 
     /**
-     * Response of bizCode 101003: temporary AWS credentials for AWS IoT access (shadow REST calls
-     * and the upcoming MQTT live-update phase).
+     * Response of bizCode 101003: temporary AWS credentials for the AWS IoT shadow REST calls.
      */
     public static class AwsCredentials {
         public @Nullable String accessKeyId;
@@ -111,7 +110,7 @@ public class XSenseApiDto {
         /** Station model code, e.g. "SBS50". */
         public @Nullable String category;
         public @Nullable String roomId;
-        /** Security mode of the station: "Disarmed", "Home" or "Away" (see XSenseSafeMode). */
+        /** Security mode of the station, e.g. "Disarmed", "Home" or "Away". */
         public @Nullable String safeMode;
         /** Online state of the station: 1 = online, other values (or null) = offline/unknown. */
         public @Nullable Integer onLine;
