@@ -89,8 +89,7 @@ class XSenseHandlerChain {
         initialize(station, stationThing);
         XSenseHomeHandler home = new XSenseHomeHandler(homeThing);
         initialize(home, homeThing);
-        account = new XSenseAccountHandler(accountThing, new XSenseApiClient(cloud, clock), () -> 300,
-                retryUnitMillis);
+        account = new XSenseAccountHandler(accountThing, new XSenseApiClient(cloud, clock), () -> 300, retryUnitMillis);
         account.setCallback(callback());
         when(accountThing.getHandler()).thenReturn(account);
     }
@@ -149,9 +148,9 @@ class XSenseHandlerChain {
             things.put(thing.getUID(), thing);
             return null;
         }).when(callback).thingUpdated(any());
-        when(callback.createChannelBuilder(any(), any())).thenAnswer(invocation -> ChannelBuilder
-                .create((ChannelUID) invocation.getArgument(0), "Number:Dimensionless")
-                .withType((ChannelTypeUID) invocation.getArgument(1)));
+        when(callback.createChannelBuilder(any(), any())).thenAnswer(
+                invocation -> ChannelBuilder.create((ChannelUID) invocation.getArgument(0), "Number:Dimensionless")
+                        .withType((ChannelTypeUID) invocation.getArgument(1)));
         when(callback.isChannelLinked(any())).thenAnswer(invocation -> linked.contains(invocation.getArgument(0)));
         return callback;
     }

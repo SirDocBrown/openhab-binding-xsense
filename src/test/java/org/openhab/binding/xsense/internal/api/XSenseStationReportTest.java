@@ -249,8 +249,8 @@ class XSenseStationReportTest {
                 List.of(byId, devs, byField), List.of(byId, byField, devs), List.of(byField, devs, byId),
                 List.of(byField, byId, devs));
         for (List<String> order : orders) {
-            var result = XSenseStationReport.resolve(
-                    reported("{\"state\":{\"reported\":{" + String.join(",", order) + "}}}"), singleDevice());
+            var result = XSenseStationReport
+                    .resolve(reported("{\"state\":{\"reported\":{" + String.join(",", order) + "}}}"), singleDevice());
             assertEquals(new XSenseDeviceState(1, 1, 3, -1), result.states().get("sn"), order.toString());
             assertEquals(List.of("rfLevel"), result.conflictingFields().get("sn"), order.toString());
         }

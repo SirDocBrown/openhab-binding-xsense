@@ -197,9 +197,8 @@ public class FakeXSenseCloud implements XSenseHttpTransport {
             if (devices.length() > 0) {
                 devices.append(',');
             }
-            devices.append("{\"deviceSn\":\"").append(children[i]).append("\",\"deviceId\":\"")
-                    .append(children[i + 1]).append("\",\"deviceType\":\"").append(children[i + 2])
-                    .append("\",\"deviceName\":\"Detector\"}");
+            devices.append("{\"deviceSn\":\"").append(children[i]).append("\",\"deviceId\":\"").append(children[i + 1])
+                    .append("\",\"deviceType\":\"").append(children[i + 2]).append("\",\"deviceName\":\"Detector\"}");
         }
         return api("{\"stations\":[{\"stationSn\":\"" + STATION_SN + "\",\"category\":\"SBS50\",\"onLine\":"
                 + stationOnline + ",\"devices\":[" + devices + "]}]}");

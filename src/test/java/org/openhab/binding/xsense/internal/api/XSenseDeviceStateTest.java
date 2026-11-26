@@ -148,8 +148,8 @@ class XSenseDeviceStateTest {
 
     @Test
     void combineTakesComplementaryAndEqualValues() {
-        var combined = XSenseDeviceState.combine(
-                List.of(new XSenseDeviceState(1, -1, 3, -1), new XSenseDeviceState(-1, 1, 3, 2)));
+        var combined = XSenseDeviceState
+                .combine(List.of(new XSenseDeviceState(1, -1, 3, -1), new XSenseDeviceState(-1, 1, 3, 2)));
         assertEquals(new XSenseDeviceState(1, 1, 3, 2), combined.state());
         assertEquals(List.of(), combined.conflicts());
         assertEquals(XSenseDeviceState.UNKNOWN, XSenseDeviceState.combine(List.of()).state());
@@ -157,8 +157,8 @@ class XSenseDeviceStateTest {
 
     @Test
     void combineResolvesConflictsPerField() {
-        var combined = XSenseDeviceState.combine(List.of(new XSenseDeviceState(1, 0, 3, 2, 5, 9, 0, 1),
-                new XSenseDeviceState(0, 2, 1, 3, 6, 10, 1, 0)));
+        var combined = XSenseDeviceState.combine(
+                List.of(new XSenseDeviceState(1, 0, 3, 2, 5, 9, 0, 1), new XSenseDeviceState(0, 2, 1, 3, 6, 10, 1, 0)));
         // online: offline wins, alarm: highest code wins, all others unknown
         assertEquals(new XSenseDeviceState(0, 2, -1, -1, -1, -1, -1, -1), combined.state());
         assertEquals(List.of("online", "alarmStatus", "batInfo", "rfLevel", "coPpm", "coPpmPeak", "isOpen", "isMoved"),

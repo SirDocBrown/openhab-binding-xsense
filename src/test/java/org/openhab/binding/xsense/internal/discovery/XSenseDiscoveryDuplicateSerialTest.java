@@ -55,8 +55,7 @@ class XSenseDiscoveryDuplicateSerialTest {
         List<DiscoveryResult> discovered = new CopyOnWriteArrayList<>();
         List<ThingUID> removed = new CopyOnWriteArrayList<>();
         DiscoveryListener listener = mock(DiscoveryListener.class);
-        doAnswer(invocation -> discovered.add(invocation.getArgument(1))).when(listener).thingDiscovered(any(),
-                any());
+        doAnswer(invocation -> discovered.add(invocation.getArgument(1))).when(listener).thingDiscovered(any(), any());
         doAnswer(invocation -> removed.add(invocation.getArgument(1))).when(listener).thingRemoved(any(), any());
 
         XSenseCloudDiscoveryService service = new XSenseCloudDiscoveryService();

@@ -100,8 +100,7 @@ class XSenseReconnectTest {
         assertEquals(1, count("cognito:RespondToAuthChallenge"));
 
         List<ThingStatusDetail> details = installation.history(XSenseHandlerChain.ACCOUNT_UID).stream()
-                .filter(info -> info.getStatus() == ThingStatus.OFFLINE).map(ThingStatusInfo::getStatusDetail)
-                .toList();
+                .filter(info -> info.getStatus() == ThingStatus.OFFLINE).map(ThingStatusInfo::getStatusDetail).toList();
         assertEquals(List.of(ThingStatusDetail.COMMUNICATION_ERROR, ThingStatusDetail.COMMUNICATION_ERROR), details);
     }
 

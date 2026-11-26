@@ -148,8 +148,8 @@ public record XSenseDeviceState(int online, int alarm, int battery, int signal, 
     }
 
     /** Names of the record fields, in the order of {@link #values()}, used for diagnostics. */
-    static final List<String> FIELD_NAMES = List.of("online", "alarmStatus", "batInfo", "rfLevel", "coPpm",
-            "coPpmPeak", "isOpen", "isMoved");
+    static final List<String> FIELD_NAMES = List.of("online", "alarmStatus", "batInfo", "rfLevel", "coPpm", "coPpmPeak",
+            "isOpen", "isMoved");
     private static final int FIELD_ONLINE = 0;
     private static final int FIELD_ALARM = 1;
 
