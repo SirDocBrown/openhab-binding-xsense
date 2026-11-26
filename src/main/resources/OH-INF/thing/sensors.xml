@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<thing:thing-descriptions bindingId="xsense"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:thing="https://openhab.org/schemas/thing-description/v1.0.0"
+	xsi:schemaLocation="https://openhab.org/schemas/thing-description/v1.0.0 https://openhab.org/schemas/thing-description-1.0.0.xsd">
+
+	<thing-type id="smoke">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="station"/>
+		</supported-bridge-type-refs>
+
+		<label>X-Sense Smoke Detector</label>
+		<description>X-Sense smoke detector (e.g. XS01-M).</description>
+		<semantic-equipment-tag>SmokeDetector</semantic-equipment-tag>
+
+		<channel-groups>
+			<channel-group id="info" typeId="info"/>
+			<channel-group id="device" typeId="device"/>
+			<channel-group id="alarm" typeId="alarm-smoke"/>
+		</channel-groups>
+
+		<representation-property>serialNumber</representation-property>
+
+		<config-description-ref uri="thing-type:xsense:sensor"/>
+	</thing-type>
+
+	<thing-type id="water">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="station"/>
+		</supported-bridge-type-refs>
+
+		<label>X-Sense Water Leak Detector</label>
+		<description>X-Sense water leak detector (e.g. SWS51).</description>
+		<semantic-equipment-tag>LeakSensor</semantic-equipment-tag>
+
+		<channel-groups>
+			<channel-group id="info" typeId="info"/>
+			<channel-group id="device" typeId="device"/>
+			<channel-group id="alarm" typeId="alarm-water"/>
+		</channel-groups>
+
+		<representation-property>serialNumber</representation-property>
+
+		<config-description-ref uri="thing-type:xsense:sensor"/>
+	</thing-type>
+
+</thing:thing-descriptions>

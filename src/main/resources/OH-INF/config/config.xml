@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config-description:config-descriptions
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:config-description="https://openhab.org/schemas/config-description/v1.0.0"
+	xsi:schemaLocation="https://openhab.org/schemas/config-description/v1.0.0 https://openhab.org/schemas/config-description-1.0.0.xsd">
+
+	<config-description uri="thing-type:xsense:account">
+		<parameter name="email" type="text" required="true">
+			<label>Email Address</label>
+			<description>Email address of the X-Sense account.</description>
+		</parameter>
+		<parameter name="password" type="text" required="true">
+			<context>password</context>
+			<label>Password</label>
+			<description>Password of the X-Sense account.</description>
+		</parameter>
+		<parameter name="refreshInterval" type="integer" unit="s" min="30">
+			<label>Refresh Interval</label>
+			<description>Interval in seconds for polling the device inventory from the X-Sense cloud. If not set, the
+				default from
+				the binding configuration applies.</description>
+			<advanced>true</advanced>
+		</parameter>
+	</config-description>
+
+	<config-description uri="thing-type:xsense:home">
+		<parameter name="houseId" type="text" required="true">
+			<label>House ID</label>
+			<description>Identifier of the home in the X-Sense cloud.</description>
+		</parameter>
+	</config-description>
+
+	<config-description uri="thing-type:xsense:station">
+		<parameter name="stationSn" type="text" required="true">
+			<label>Serial Number</label>
+			<description>Serial number of the base station.</description>
+		</parameter>
+	</config-description>
+
+	<config-description uri="thing-type:xsense:sensor">
+		<parameter name="deviceSn" type="text" required="true">
+			<label>Serial Number</label>
+			<description>Serial number of the sensor.</description>
+		</parameter>
+	</config-description>
+
+</config-description:config-descriptions>
