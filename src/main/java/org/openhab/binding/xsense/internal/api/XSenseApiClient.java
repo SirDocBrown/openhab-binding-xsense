@@ -12,15 +12,10 @@
  */
 package org.openhab.binding.xsense.internal.api;
 
-import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -32,9 +27,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.eclipse.jetty.client.ContentResponse;
+import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.client.Request;
+import org.eclipse.jetty.client.StringRequestContent;
+import org.eclipse.jetty.http.HttpMethod;
+import org.eclipse.jetty.http.HttpStatus;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.ApiResponse;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.AwsCredentials;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.ClientInfo;
@@ -191,22 +195,22 @@ public class XSenseApiClient {
             throw new XSenseApiException("Invalid station shadow address");
         }
         String url = shadowUrl(region, "SBS50" + stationSn, "2nd_mainpage");
-        HttpResponse<String> response = readShadow(url, region, getAwsCredentials());
-        if (response.statusCode() == 404) {
+        ContentResponse response = readShadow(url, region, getAwsCredentials());
+        if (response.getStatus() == HttpStatus.NOT_FOUND_404) {
             url = shadowUrl(region, "SBS50" + stationSn, "mainpage");
             response = readShadow(url, region, getAwsCredentials());
         }
-        if (response.statusCode() == 401 || response.statusCode() == 403) {
+        if (response.getStatus() == HttpStatus.UNAUTHORIZED_401 || response.getStatus() == HttpStatus.FORBIDDEN_403) {
             response = readShadow(url, region, refreshAwsCredentials());
         }
-        if (response.statusCode() != 200) {
-            throw new XSenseApiException("Station shadow returned HTTP " + response.statusCode());
+        if (response.getStatus() != HttpStatus.OK_200) {
+            throw new XSenseApiException("Station shadow returned HTTP " + response.getStatus());
         }
-        JsonObject document = fromJson(response.body(), JsonObject.class);
+        JsonObject document = fromJson(response.getContentAsString(), JsonObject.class);
         return XSenseDeviceState.devices(document);
     }
 
-    private HttpResponse<String> readShadow(String url, String mqttRegion, AwsCredentials credentials)
+    private ContentResponse readShadow(String url, String mqttRegion, AwsCredentials credentials)
             throws XSenseApiException {
         String accessKeyId = credentials.accessKeyId;
         String secretAccessKey = credentials.secretAccessKey;
@@ -220,22 +224,19 @@ public class XSenseApiClient {
         headers.put("X-Amz-Security-Token", sessionToken);
         Map<String, String> signature = new XSenseAwsSigV4(mqttRegion, IOT_SERVICE).sign("GET", URI.create(url),
                 headers, "", accessKeyId, secretAccessKey, Instant.now());
-        try {
-            var request = HttpRequest.newBuilder(URI.create(url)).GET()
-                    .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SEC));
-            headers.forEach(request::header);
+        Request request = httpClient.newRequest(url).method(HttpMethod.GET).timeout(REQUEST_TIMEOUT_SEC,
+                TimeUnit.SECONDS);
+        // The signed headers must be sent exactly as signed; put() replaces client defaults such as the
+        // User-Agent. The Host header is set by the HTTP client itself.
+        request.headers(httpFields -> {
+            headers.forEach(httpFields::put);
             signature.forEach((key, value) -> {
                 if (!"Host".equals(key)) {
-                    request.header(key, value);
+                    httpFields.put(key, value);
                 }
             });
-            return httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
-        } catch (IOException e) {
-            throw new XSenseApiException("Shadow request to " + url + " failed: " + e.getMessage(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new XSenseApiException("Shadow request to " + url + " interrupted", e);
-        }
+        });
+        return send(request, url);
     }
 
     /**
@@ -448,7 +449,7 @@ public class XSenseApiClient {
     private void parseAuthenticationResult(JsonObject result) throws XSenseApiException {
         JsonElement token = result.get("AccessToken");
         if (token == null || !token.isJsonPrimitive()) {
-            throw new XSenseApiException("Cognito response misses AccessToken", true);
+            throw new XSenseApiException("Cognito response misses AccessToken");
         }
         accessToken = token.getAsString();
         JsonElement refresh = result.get("RefreshToken");
@@ -486,24 +487,40 @@ public class XSenseApiClient {
 
     private String httpPost(String url, String body, String contentType, @Nullable String authToken,
             Map<String, String> additionalHeaders) throws XSenseApiException {
-        try {
-            var request = HttpRequest.newBuilder(URI.create(url)).POST(HttpRequest.BodyPublishers.ofString(body))
-                    .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SEC)).header("Content-Type", contentType);
+        Request request = httpClient.newRequest(url).method(HttpMethod.POST)
+                .timeout(REQUEST_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .body(new StringRequestContent(contentType, body, StandardCharsets.UTF_8));
+        request.headers(httpFields -> {
             if (authToken != null) {
-                request.header("Authorization", authToken);
+                httpFields.put("Authorization", authToken);
             }
-            additionalHeaders.forEach(request::header);
-            HttpResponse<String> response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
-            String content = response.body();
-            if (response.statusCode() >= 400) {
-                // Cognito errors are reported with HTTP 400 and a JSON body containing "__type"
-                if (content.contains("\"__type\"")) {
-                    return content;
-                }
-                throw new XSenseApiException("HTTP " + response.statusCode() + " from " + url);
+            additionalHeaders.forEach(httpFields::put);
+        });
+        ContentResponse response = send(request, url);
+        String content = response.getContentAsString();
+        if (response.getStatus() >= HttpStatus.BAD_REQUEST_400) {
+            // Cognito reports errors with HTTP 400 and a JSON body carrying the error type in "__type"
+            if (isCognitoError(content)) {
+                return content;
             }
-            return content;
-        } catch (IOException e) {
+            throw new XSenseApiException("HTTP " + response.getStatus() + " from " + url);
+        }
+        return content;
+    }
+
+    private boolean isCognitoError(String content) {
+        try {
+            JsonObject json = gson.fromJson(content, JsonObject.class);
+            return json != null && json.has("__type");
+        } catch (JsonSyntaxException e) {
+            return false;
+        }
+    }
+
+    private static ContentResponse send(Request request, String url) throws XSenseApiException {
+        try {
+            return request.send();
+        } catch (TimeoutException | ExecutionException e) {
             throw new XSenseApiException("Request to " + url + " failed: " + e.getMessage(), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

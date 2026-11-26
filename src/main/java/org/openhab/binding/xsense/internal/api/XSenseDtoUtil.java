@@ -41,20 +41,6 @@ public final class XSenseDtoUtil {
     }
 
     /**
-     * Returns the string value, or {@code ""} when it is null.
-     */
-    public static String orEmpty(@Nullable String value) {
-        return orDefault(value, "");
-    }
-
-    /**
-     * Returns the integer value, or {@code 0} when it is null.
-     */
-    public static int orZero(@Nullable Integer value) {
-        return orDefault(value, 0);
-    }
-
-    /**
      * Masks an email address for display/logging: first character + *** + domain.
      */
     public static String maskEmail(String email) {
