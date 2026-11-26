@@ -78,9 +78,9 @@ class XSenseCoPeakChannelTest {
             current = invocation.getArgument(0);
             return null;
         }).when(callback).thingUpdated(any());
-        when(callback.createChannelBuilder(any(), any())).thenAnswer(invocation -> ChannelBuilder
-                .create((ChannelUID) invocation.getArgument(0), "Number:Dimensionless")
-                .withType((ChannelTypeUID) invocation.getArgument(1)));
+        when(callback.createChannelBuilder(any(), any())).thenAnswer(
+                invocation -> ChannelBuilder.create((ChannelUID) invocation.getArgument(0), "Number:Dimensionless")
+                        .withType((ChannelTypeUID) invocation.getArgument(1)));
         when(callback.isChannelLinked(any()))
                 .thenAnswer(invocation -> linked.contains(((ChannelUID) invocation.getArgument(0)).getId()));
         handler.setCallback(callback);
