@@ -12,30 +12,30 @@
  */
 package org.openhab.binding.xsense.internal.handler;
 
-import java.net.http.HttpClient;
+import static org.openhab.binding.xsense.internal.XSenseBindingConstants.STATION_TYPE_SBS50;
+
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Supplier;
+import java.util.function.IntSupplier;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.eclipse.jetty.client.HttpClient;
 import org.openhab.binding.xsense.internal.api.XSenseApiClient;
 import org.openhab.binding.xsense.internal.api.XSenseApiException;
 import org.openhab.binding.xsense.internal.api.XSenseDeviceState;
+import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Device;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.House;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Station;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.StationList;
 import org.openhab.binding.xsense.internal.config.XSenseAccountConfiguration;
 import org.openhab.binding.xsense.internal.config.XSenseBindingConfiguration;
 import org.openhab.binding.xsense.internal.discovery.XSenseCloudDiscoveryService;
-import org.openhab.core.i18n.LocaleProvider;
-import org.openhab.core.i18n.TranslationProvider;
 import org.openhab.core.thing.Bridge;
 import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
@@ -46,8 +46,6 @@ import org.openhab.core.thing.binding.ThingHandler;
 import org.openhab.core.thing.binding.ThingHandlerService;
 import org.openhab.core.types.Command;
 import org.openhab.core.types.RefreshType;
-import org.osgi.framework.Bundle;
-import org.osgi.framework.FrameworkUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,6 +54,7 @@ import org.slf4j.LoggerFactory;
  * API client, performs the login and polls the house/station/device inventory.
  *
  * @author Markus Michels - Initial contribution
+ * @author Andreas Rothstein - Shared HTTP client, non-blocking dispose
  */
 @NonNullByDefault
 public class XSenseAccountHandler extends BaseBridgeHandler {
@@ -86,17 +85,14 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     private static final long RETRY_DELAY_MAX_SEC = 900;
 
     private final Logger logger = LoggerFactory.getLogger(XSenseAccountHandler.class);
-    private final Bundle bundle = FrameworkUtil.getBundle(XSenseAccountHandler.class);
     private final XSenseApiClient apiClient;
-    private final Supplier<XSenseBindingConfiguration> bindingConfig;
-    private final TranslationProvider i18nProvider;
-    private final LocaleProvider localeProvider;
+    // Binding level default, queried on use so that later binding configuration changes apply
+    private final IntSupplier defaultRefreshInterval;
 
     private volatile XSenseAccountConfiguration config = new XSenseAccountConfiguration();
     // Only accessed from the synchronized connect()/poll() methods
     private long retryDelay = RETRY_DELAY_MIN_SEC;
 
-    // Written under the handler monitor, but read from dispose() and other threads
     private volatile boolean disposed;
     private final AtomicBoolean refreshQueued = new AtomicBoolean();
     private volatile @Nullable ScheduledFuture<?> pollJob;
@@ -106,14 +102,10 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     // Latest inventory snapshot, replaced atomically after each poll
     private volatile Inventory inventory = Inventory.EMPTY;
 
-    public XSenseAccountHandler(Bridge bridge, HttpClient httpClient,
-            Supplier<XSenseBindingConfiguration> bindingConfig, TranslationProvider i18nProvider,
-            LocaleProvider localeProvider) {
+    public XSenseAccountHandler(Bridge bridge, HttpClient httpClient, IntSupplier defaultRefreshInterval) {
         super(bridge);
         apiClient = new XSenseApiClient(httpClient);
-        this.bindingConfig = bindingConfig;
-        this.i18nProvider = i18nProvider;
-        this.localeProvider = localeProvider;
+        this.defaultRefreshInterval = defaultRefreshInterval;
     }
 
     @Override
@@ -125,31 +117,14 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             return;
         }
         updateStatus(ThingStatus.UNKNOWN);
-        applyLabel();
         scheduler.execute(this::connect);
     }
 
-    /**
-     * Sets the thing label to "X-Sense Account (&lt;account id&gt;)" so the account is
-     * identifiable in the UI without exposing the email address.
-     */
-    private void applyLabel() {
-        String accountId = getAccountId();
-        Locale locale = localeProvider.getLocale();
-        String defaultLabel = "X-Sense Account (" + accountId + ")";
-        String label = i18nProvider.getText(bundle, "account.label", defaultLabel, locale, accountId);
-        if (label == null) {
-            label = defaultLabel;
-        }
-        if (!label.equals(getThing().getLabel())) {
-            updateThing(editThing().withLabel(label).build());
-        }
-    }
-
     @Override
-    public synchronized void dispose() {
-        // Synchronized with connect()/poll() so a still-in-flight call cannot schedule a new job
-        // after this method has already stopped and nulled out the job fields.
+    public void dispose() {
+        // Not synchronized: a poll may be blocked in cloud I/O while holding the monitor. The job
+        // fields are volatile and every scheduling method re-checks the flag after assigning its job,
+        // so a job scheduled concurrently with dispose() is cancelled by one of the two threads.
         disposed = true;
         stopJob(pollJob);
         pollJob = null;
@@ -188,9 +163,8 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     }
 
     /**
-     * Returns the id of this account used in path/unique ids and log prefixes: the account thing's
-     * UID id segment (e.g. "a03c377df2"), not the email address, so neither the UI nor the log
-     * expose the full account email.
+     * Returns the id of this account used in log prefixes: the account thing's UID id segment, so
+     * the log does not expose the account email address.
      */
     public String getAccountId() {
         return thing.getUID().getId();
@@ -245,14 +219,17 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             startPolling();
         } catch (XSenseApiException e) {
             logger.debug("{}: login failed: {}", logId, e.getMessage());
+            if (disposed) {
+                return;
+            }
             if (e.isAuthenticationFailure()) {
                 updateStatus(ThingStatusDetail.CONFIGURATION_ERROR,
-                        "@text/offline.config-error-login [\"" + e.getMessage() + "\"]");
+                        statusText("offline.config-error-login", e.getMessage()));
                 // No automatic retry: a new login only succeeds after a configuration change
                 return;
             }
             updateStatus(ThingStatusDetail.COMMUNICATION_ERROR,
-                    "@text/offline.communication-error [\"" + e.getMessage() + "\"]");
+                    statusText("offline.communication-error", e.getMessage()));
             scheduleReconnect();
         }
     }
@@ -262,7 +239,12 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             return;
         }
         stopJob(pollJob);
-        pollJob = scheduler.scheduleWithFixedDelay(this::poll, 0, effectiveRefreshInterval(), TimeUnit.SECONDS);
+        ScheduledFuture<?> job = scheduler.scheduleWithFixedDelay(this::poll, 0, effectiveRefreshInterval(),
+                TimeUnit.SECONDS);
+        pollJob = job;
+        if (disposed) {
+            job.cancel(true);
+        }
     }
 
     /**
@@ -274,7 +256,7 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
         if (thingInterval > 0) {
             return Math.max(XSenseBindingConfiguration.MIN_REFRESH_INTERVAL_SEC, thingInterval);
         }
-        return bindingConfig.get().refreshInterval;
+        return defaultRefreshInterval.getAsInt();
     }
 
     /**
@@ -310,6 +292,9 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
                     newStations.put(houseId, stationList);
                 }
             }
+            if (disposed) {
+                return;
+            }
             inventory = new Inventory(List.copyOf(newHouses), Map.copyOf(newStations));
             retryDelay = RETRY_DELAY_MIN_SEC;
             updateStatus(ThingStatus.ONLINE);
@@ -320,28 +305,36 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             }
         } catch (XSenseApiException e) {
             logger.debug("{}: inventory poll failed: {}", logId, e.getMessage());
+            if (disposed) {
+                return;
+            }
             if (e.isAuthenticationFailure()) {
-                stopJob(pollJob);
+                ScheduledFuture<?> job = pollJob;
+                if (job != null) {
+                    // May be the job running this poll, so do not interrupt the current thread
+                    job.cancel(false);
+                }
                 pollJob = null;
                 updateStatus(ThingStatusDetail.COMMUNICATION_ERROR,
-                        "@text/offline.communication-error-session [\"" + e.getMessage() + "\"]");
+                        statusText("offline.communication-error-session", e.getMessage()));
                 scheduleReconnect();
             } else {
                 updateStatus(ThingStatusDetail.COMMUNICATION_ERROR,
-                        "@text/offline.communication-error [\"" + e.getMessage() + "\"]");
+                        statusText("offline.communication-error", e.getMessage()));
             }
         }
     }
 
     private void readSensorStates(String region, Station station) throws XSenseApiException {
         String serial = station.stationSn;
-        if (!"SBS50".equals(station.category) || !Integer.valueOf(1).equals(station.onLine) || station.devices == null
-                || station.devices.isEmpty() || serial == null) {
+        List<Device> devices = station.devices;
+        if (!STATION_TYPE_SBS50.equals(station.category) || !Integer.valueOf(1).equals(station.onLine)
+                || devices == null || devices.isEmpty() || serial == null) {
             return;
         }
         try {
             var states = apiClient.getDeviceStates(region, serial);
-            for (var device : station.devices) {
+            for (Device device : devices) {
                 String deviceSerial = device.deviceSn;
                 if (deviceSerial != null) {
                     device.reported = XSenseDeviceState.read(states, deviceSerial);
@@ -365,7 +358,7 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             if (handler instanceof XSenseHomeHandler homeHandler) {
                 String houseId = homeHandler.getHouseId();
                 homeHandler.updateFromInventory(findHouse(snapshot.houses, houseId),
-                        snapshot.stationsByHouseId.get(houseId), getAccountId());
+                        snapshot.stationsByHouseId.get(houseId));
             }
         }
     }
@@ -388,8 +381,21 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             return;
         }
         stopJob(reconnectJob);
-        reconnectJob = scheduler.schedule(this::connect, retryDelay, TimeUnit.SECONDS);
+        ScheduledFuture<?> job = scheduler.schedule(this::connect, retryDelay, TimeUnit.SECONDS);
+        reconnectJob = job;
+        if (disposed) {
+            job.cancel(true);
+        }
         retryDelay = Math.min(retryDelay * 2, RETRY_DELAY_MAX_SEC);
+    }
+
+    /**
+     * Builds a translatable status description with one argument. Double quotes would terminate the
+     * argument list of the "@text" syntax and are therefore replaced.
+     */
+    private static String statusText(String key, @Nullable String argument) {
+        String safeArgument = argument == null ? "" : argument.replace('"', '\'');
+        return "@text/" + key + " [\"" + safeArgument + "\"]";
     }
 
     private static void stopJob(@Nullable ScheduledFuture<?> job) {
