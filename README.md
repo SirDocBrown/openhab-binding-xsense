@@ -1,6 +1,6 @@
 # X-Sense Binding
 
-This binding integrates [X-Sense](https://www.x-sense.com) home safety devices into openHAB: smoke detectors and water leak sensors, with more sensor types (CO, heat, thermo-hygrometer, security accessories) planned for a follow-up release.
+This binding integrates [X-Sense](https://www.x-sense.com) home safety devices into openHAB: smoke, carbon monoxide (CO), combined smoke/CO, heat and water leak detectors as well as door and motion sensors.
 Sensors are connected through the X-Sense SBS50 Base Station, which links the battery powered sensors via a proprietary RF protocol and connects to the network via 2.4 GHz Wi-Fi.
 
 ## Scope and Cloud Usage
@@ -36,15 +36,21 @@ Account things inherit this value unless they configure their own interval.
 
 ## Supported Things
 
-| Thing Type UID | Type   | Description                                        |
-|----------------|--------|----------------------------------------------------|
-| xsense:account | Bridge | Represents your X-Sense account (cloud connection) |
-| xsense:home    | Bridge | A home (house) registered in the account           |
-| xsense:station | Bridge | X-Sense SBS50 Base Station                         |
-| xsense:smoke   | Thing  | Smoke detector (e.g. XS01-M, XS0B-MR, XS0D-MR)     |
-| xsense:water   | Thing  | Water leak detector (e.g. SWS51, SWS54)            |
+| Thing Type UID | Type   | Description                                                                  |
+|----------------|--------|------------------------------------------------------------------------------|
+| xsense:account | Bridge | Represents your X-Sense account (cloud connection)                           |
+| xsense:home    | Bridge | A home (house) registered in the account                                     |
+| xsense:station | Bridge | X-Sense SBS50 Base Station                                                   |
+| xsense:smoke   | Thing  | Smoke detector (XS01-M, XS0B-MR, XS0D-MR, SD11-MR, XP02S-MR)                 |
+| xsense:co      | Thing  | Carbon monoxide detector (XC01-M, XC0C-MR, XC0M-MR)                          |
+| xsense:combo   | Thing  | Combined smoke and CO detector (SC01-MR, SC07-MR, XP0A-MR, XP0H-MR, XP0P-MR) |
+| xsense:heat    | Thing  | Heat detector (XH02-M)                                                       |
+| xsense:water   | Thing  | Water leak detector (SWS51, SWS0A)                                           |
+| xsense:door    | Thing  | Door and window contact sensor (SDS0A)                                       |
+| xsense:motion  | Thing  | Motion sensor (SMS0A)                                                        |
 
-Additional sensor types (CO, heat, thermo-hygrometer, security accessories) are recognized by the cloud API but not yet exposed as things; they will be added in a follow-up release.
+Only devices connected to an SBS50 base station are supported.
+Stand-alone Wi-Fi devices (e.g. XS01-WX, XC04-WX, SC07-WX) and thermo-hygrometers (STH51, STH0A, STH0B) are recognized by the cloud API but not yet exposed as things.
 
 ## Discovery
 
@@ -81,7 +87,7 @@ Unsupported device models are logged on debug level, please report them so suppo
 
 ### Sensor Thing Configuration
 
-All sensor things (`smoke`, `water`) share the same configuration:
+All sensor things (`smoke`, `co`, `combo`, `heat`, `water`, `door`, `motion`) share the same configuration:
 
 | Name     | Type | Description                 | Default | Required | Advanced |
 |----------|------|-----------------------------|---------|----------|----------|
@@ -94,18 +100,39 @@ Their state is reflected in the thing status and the thing properties (e.g. home
 
 Sensor things have the following channels:
 
-| Channel             | Type   | Read/Write | Thing Type | Description                                                                |
-|---------------------|--------|------------|------------|----------------------------------------------------------------------------|
-| `alarm#smoke`       | Switch | R          | `smoke`    | `ON` while the detector reports a smoke alarm                              |
-| `alarm#water`       | Switch | R          | `water`    | `ON` while the detector reports a water leak                               |
-| `device#battery`    | Number | R          | all        | Battery level in percent, reported in four steps (0, 33, 67, 100)          |
-| `device#lowBattery` | Switch | R          | all        | `ON` when the battery level is at one of the two lowest steps              |
-| `device#signal`     | Number | R          | all        | Radio signal strength between sensor and base station (0 = none, 3 = best) |
+| Channel              | Type                 | Read/Write | Thing Type    | Description                                                                       |
+|----------------------|----------------------|------------|---------------|-----------------------------------------------------------------------------------|
+| `alarm#smoke`        | Switch               | R          | `smoke`       | `ON` while the detector reports a smoke alarm                                     |
+| `alarm#co`           | Switch               | R          | `co`          | `ON` while the detector reports a carbon monoxide alarm                           |
+| `alarm#alarm`        | Switch               | R          | `combo`       | `ON` while the detector reports a smoke or carbon monoxide alarm                  |
+| `alarm#heat`         | Switch               | R          | `heat`        | `ON` while the detector reports a heat alarm                                      |
+| `alarm#water`        | Switch               | R          | `water`       | `ON` while the detector reports a water leak                                      |
+| `measurement#co`     | Number:Dimensionless | R          | `co`, `combo` | Current carbon monoxide concentration in ppm                                      |
+| `measurement#coPeak` | Number:Dimensionless | R          | `co`, `combo` | Highest carbon monoxide concentration recorded by the detector, in ppm (advanced) |
+| `state#contact`      | Contact              | R          | `door`        | `OPEN` or `CLOSED`                                                                |
+| `state#motion`       | Switch               | R          | `motion`      | `ON` while the sensor detects motion                                              |
+| `device#battery`     | Number               | R          | all           | Battery level in percent, reported in four steps (0, 33, 67, 100)                 |
+| `device#lowBattery`  | Switch               | R          | all           | `ON` when the battery level is at one of the two lowest steps                     |
+| `device#signal`      | Number               | R          | all           | Radio signal strength between sensor and base station (0 = none, 3 = best)        |
 
 Missing or invalid values are set to `UNDEF`.
 When the sensor reports that it is not connected to the base station, the thing goes offline and all channels become `UNDEF`.
 
-Water leak detectors use the same reported state fields as smoke detectors (`alarmStatus`, battery and signal level).
+Combined smoke/CO detectors report a single alarm status, so `alarm#alarm` does not distinguish between smoke and carbon monoxide.
+
+Support for CO, combined, heat, water leak, door and motion devices is based on the station data documented by the [Python X-Sense client](https://github.com/theosnel/python-xsense) and the [Home Assistant integration](https://github.com/Jarnsen/ha-xsense-component_test) and has not yet been verified with all models.
+Please report models that do not work as expected, together with a debug log (see below).
+
+## Troubleshooting
+
+To log the raw state that the base station reports for each device, enable debug logging in the openHAB console:
+
+```shell
+log:set DEBUG org.openhab.binding.xsense
+```
+
+The log then contains lines like `station <serial>, device <serial> (<model>): {...}` for each poll.
+Restore the default level with `log:set INFO org.openhab.binding.xsense`.
 
 ## Full Example
 
@@ -120,6 +147,7 @@ Bridge xsense:account:myaccount "My X-Sense Account" [ email="user@example.com",
         Bridge station sbs50 "Hallway Base Station" [ stationSn="SBS50-1234" ] {
             Thing smoke kitchen "Kitchen Smoke Detector" [ deviceSn="DEV567" ]
             Thing water basement "Basement Water Sensor" [ deviceSn="DEV890" ]
+            Thing co garage "Garage CO Detector" [ deviceSn="DEV345" ]
         }
     }
 }
@@ -132,6 +160,8 @@ Switch KitchenSmokeAlarm   "Kitchen Smoke Alarm"   <fire>    { channel="xsense:s
 Number KitchenSmokeBattery "Kitchen Battery [%d %%]" <battery> { channel="xsense:smoke:myaccount:h1a2b3:sbs50:kitchen:device#battery" }
 Switch KitchenSmokeLowBat  "Kitchen Low Battery"   <lowbattery> { channel="xsense:smoke:myaccount:h1a2b3:sbs50:kitchen:device#lowBattery" }
 Switch BasementWaterLeak   "Basement Water Leak"   <water>   { channel="xsense:water:myaccount:h1a2b3:sbs50:basement:alarm#water" }
+Switch GarageCoAlarm       "Garage CO Alarm"       <alarm>   { channel="xsense:co:myaccount:h1a2b3:sbs50:garage:alarm#co" }
+Number:Dimensionless GarageCo "Garage CO [%d ppm]" { channel="xsense:co:myaccount:h1a2b3:sbs50:garage:measurement#co", unit="ppm" }
 ```
 
 ### Rule Example

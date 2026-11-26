@@ -26,6 +26,9 @@ import org.openhab.binding.xsense.internal.api.XSenseDeviceState;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Device;
 import org.openhab.core.library.types.DecimalType;
 import org.openhab.core.library.types.OnOffType;
+import org.openhab.core.library.types.OpenClosedType;
+import org.openhab.core.library.types.QuantityType;
+import org.openhab.core.library.unit.Units;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
@@ -109,6 +112,60 @@ class XSenseSensorHandlerTest {
         assertEquals(OnOffType.OFF, published.get("device#lowBattery"));
         assertEquals(new DecimalType(100), published.get("device#battery"));
         assertFalse(published.containsKey("alarm#smoke"));
+    }
+
+    @Test
+    void coDetectorPublishesAlarmAndConcentration() {
+        XSenseSensorHandler handler = createHandler(XSenseBindingConstants.THING_TYPE_CO);
+        Device device = new Device();
+
+        device.reported = new XSenseDeviceState(1, 1, 3, 3, 120, 150, -1, -1);
+        handler.updateFromInventory(device);
+        assertEquals(OnOffType.ON, published.get("alarm#co"));
+        assertEquals(new QuantityType<>(120, Units.PARTS_PER_MILLION), published.get("measurement#co"));
+        assertEquals(new QuantityType<>(150, Units.PARTS_PER_MILLION), published.get("measurement#coPeak"));
+        assertFalse(published.containsKey("alarm#smoke"));
+
+        device.reported = new XSenseDeviceState(1, 0, 3, 3, 0, -1, -1, -1);
+        handler.updateFromInventory(device);
+        assertEquals(OnOffType.OFF, published.get("alarm#co"));
+        assertEquals(new QuantityType<>(0, Units.PARTS_PER_MILLION), published.get("measurement#co"));
+        assertEquals(UnDefType.UNDEF, published.get("measurement#coPeak"));
+    }
+
+    @Test
+    void combinationAndHeatDetectorsUseTheirAlarmChannels() {
+        createHandler(XSenseBindingConstants.THING_TYPE_COMBO)
+                .updateFromInventory(deviceWith(new XSenseDeviceState(1, 2, 2, 2, 30, 30, -1, -1)));
+        assertEquals(OnOffType.ON, published.get("alarm#alarm"));
+        assertEquals(new QuantityType<>(30, Units.PARTS_PER_MILLION), published.get("measurement#co"));
+
+        createHandler(XSenseBindingConstants.THING_TYPE_HEAT)
+                .updateFromInventory(deviceWith(new XSenseDeviceState(1, 0, 2, 2)));
+        assertEquals(OnOffType.OFF, published.get("alarm#heat"));
+    }
+
+    @Test
+    void doorAndMotionSensorsPublishTheirState() {
+        createHandler(XSenseBindingConstants.THING_TYPE_DOOR)
+                .updateFromInventory(deviceWith(new XSenseDeviceState(1, -1, 3, 2, -1, -1, 1, -1)));
+        assertEquals(OpenClosedType.OPEN, published.get("state#contact"));
+        assertEquals(ThingStatus.ONLINE, status);
+
+        createHandler(XSenseBindingConstants.THING_TYPE_DOOR)
+                .updateFromInventory(deviceWith(new XSenseDeviceState(1, -1, 3, 2, -1, -1, 0, -1)));
+        assertEquals(OpenClosedType.CLOSED, published.get("state#contact"));
+
+        createHandler(XSenseBindingConstants.THING_TYPE_MOTION)
+                .updateFromInventory(deviceWith(new XSenseDeviceState(1, -1, 3, 2, -1, -1, -1, 1)));
+        assertEquals(OnOffType.ON, published.get("state#motion"));
+        assertFalse(published.containsKey("alarm#smoke"));
+    }
+
+    private static Device deviceWith(XSenseDeviceState state) {
+        Device device = new Device();
+        device.reported = state;
+        return device;
     }
 
     @Test

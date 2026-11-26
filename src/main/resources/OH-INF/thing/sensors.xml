@@ -42,4 +42,101 @@
 		<config-description-ref uri="thing-type:xsense:sensor"/>
 	</thing-type>
 
+	<thing-type id="co">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="station"/>
+		</supported-bridge-type-refs>
+
+		<label>X-Sense CO Detector</label>
+		<description>X-Sense carbon monoxide detector (e.g. XC01-M).</description>
+		<semantic-equipment-tag>COSensor</semantic-equipment-tag>
+
+		<channel-groups>
+			<channel-group id="device" typeId="device"/>
+			<channel-group id="alarm" typeId="alarm-co"/>
+			<channel-group id="measurement" typeId="measurement-co"/>
+		</channel-groups>
+
+		<representation-property>serialNumber</representation-property>
+
+		<config-description-ref uri="thing-type:xsense:sensor"/>
+	</thing-type>
+
+	<thing-type id="combo">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="station"/>
+		</supported-bridge-type-refs>
+
+		<label>X-Sense Smoke and CO Detector</label>
+		<description>X-Sense combined smoke and carbon monoxide detector (e.g. SC07-MR).</description>
+		<semantic-equipment-tag>FireDetector</semantic-equipment-tag>
+
+		<channel-groups>
+			<channel-group id="device" typeId="device"/>
+			<channel-group id="alarm" typeId="alarm-combo"/>
+			<channel-group id="measurement" typeId="measurement-co"/>
+		</channel-groups>
+
+		<representation-property>serialNumber</representation-property>
+
+		<config-description-ref uri="thing-type:xsense:sensor"/>
+	</thing-type>
+
+	<thing-type id="heat">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="station"/>
+		</supported-bridge-type-refs>
+
+		<label>X-Sense Heat Detector</label>
+		<description>X-Sense heat detector (e.g. XH02-M).</description>
+		<semantic-equipment-tag>HeatDetector</semantic-equipment-tag>
+
+		<channel-groups>
+			<channel-group id="device" typeId="device"/>
+			<channel-group id="alarm" typeId="alarm-heat"/>
+		</channel-groups>
+
+		<representation-property>serialNumber</representation-property>
+
+		<config-description-ref uri="thing-type:xsense:sensor"/>
+	</thing-type>
+
+	<thing-type id="door">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="station"/>
+		</supported-bridge-type-refs>
+
+		<label>X-Sense Door Sensor</label>
+		<description>X-Sense door and window contact sensor (e.g. SDS0A).</description>
+		<semantic-equipment-tag>ContactSensor</semantic-equipment-tag>
+
+		<channel-groups>
+			<channel-group id="device" typeId="device"/>
+			<channel-group id="state" typeId="state-door"/>
+		</channel-groups>
+
+		<representation-property>serialNumber</representation-property>
+
+		<config-description-ref uri="thing-type:xsense:sensor"/>
+	</thing-type>
+
+	<thing-type id="motion">
+		<supported-bridge-type-refs>
+			<bridge-type-ref id="station"/>
+		</supported-bridge-type-refs>
+
+		<label>X-Sense Motion Sensor</label>
+		<description>X-Sense motion sensor (e.g. SMS0A).</description>
+		<semantic-equipment-tag>MotionDetector</semantic-equipment-tag>
+
+		<channel-groups>
+			<channel-group id="device" typeId="device"/>
+			<channel-group id="state" typeId="state-motion"/>
+		</channel-groups>
+
+		<representation-property>serialNumber</representation-property>
+
+		<config-description-ref uri="thing-type:xsense:sensor"/>
+	</thing-type>
+
 </thing:thing-descriptions>

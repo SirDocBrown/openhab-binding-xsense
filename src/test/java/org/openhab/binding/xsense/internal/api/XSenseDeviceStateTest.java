@@ -20,7 +20,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 /**
- * Tests decoding the reported smoke detector state.
+ * Tests decoding the reported detector and sensor states.
  *
  * @author Andreas Rothstein - Initial contribution
  */
@@ -49,6 +49,47 @@ class XSenseDeviceStateTest {
         assertEquals(XSenseDeviceState.UNKNOWN, XSenseDeviceState.read(states, "A"));
         assertEquals(1, XSenseDeviceState.read(states, "B").alarm());
         assertEquals(new XSenseDeviceState(-1, 3, -1, 0), XSenseDeviceState.read(states, "C"));
+    }
+
+    @Test
+    void decodesCarbonMonoxideLevelsAndPeak() {
+        var states = json("""
+                {"CO":{"online":"1","batInfo":"3","rfLevel":"3","alarmStatus":"0","coPpm":"12",
+                "peak":{"coPpmPeak":"45","time":"20260709010102"}},
+                "FLAT":{"coPpm":7,"coPpmPeak":9},"BAD":{"coPpm":"-3","peak":{"coPpmPeak":"high"}}}
+                """);
+        XSenseDeviceState co = XSenseDeviceState.read(states, "CO");
+        assertEquals(12, co.coPpm());
+        assertEquals(45, co.coPeak());
+        assertEquals(0, co.alarm());
+        assertEquals(7, XSenseDeviceState.read(states, "FLAT").coPpm());
+        assertEquals(9, XSenseDeviceState.read(states, "FLAT").coPeak());
+        assertEquals(-1, XSenseDeviceState.read(states, "BAD").coPpm());
+        assertEquals(-1, XSenseDeviceState.read(states, "BAD").coPeak());
+    }
+
+    @Test
+    void decodesDoorContactInAllReportedForms() {
+        var states = json("""
+                {"A":{"isOpen":"1"},"B":{"a":"0"},"C":{"status":"open"},"D":{"status":{"doorStatus":"closed"}},
+                "E":{"open":true},"F":{"batInfo":"2"}}
+                """);
+        assertEquals(1, XSenseDeviceState.read(states, "A").open());
+        assertEquals(0, XSenseDeviceState.read(states, "B").open());
+        assertEquals(1, XSenseDeviceState.read(states, "C").open());
+        assertEquals(0, XSenseDeviceState.read(states, "D").open());
+        assertEquals(1, XSenseDeviceState.read(states, "E").open());
+        assertEquals(-1, XSenseDeviceState.read(states, "F").open());
+    }
+
+    @Test
+    void decodesMotion() {
+        var states = json("""
+                {"M":{"isMoved":"1"},"N":{"status":{"isMoved":false}},"O":{"isMoved":"maybe"}}
+                """);
+        assertEquals(1, XSenseDeviceState.read(states, "M").motion());
+        assertEquals(0, XSenseDeviceState.read(states, "N").motion());
+        assertEquals(-1, XSenseDeviceState.read(states, "O").motion());
     }
 
     @Test
