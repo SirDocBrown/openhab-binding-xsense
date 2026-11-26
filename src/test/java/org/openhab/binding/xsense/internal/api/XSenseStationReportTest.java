@@ -15,6 +15,8 @@ package org.openhab.binding.xsense.internal.api;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -98,10 +100,10 @@ class XSenseStationReportTest {
                   "devs":{"XS01M-TEST-A":{"online":1,"alarmStatus":"0"},"XS01M-TEST-B":{"online":1,"alarmStatus":"0"}},
                   "00000002":{"status":{"alarmStatus":"1"}}}}}
                 """), twoDetectors());
-        // B: devs record (alarm 0) and flat record (alarm 1) contradict each other -> no state
+        // B: devs record (alarm 0) and flat record (alarm 1) contradict each other: the alarm wins
         assertEquals(0, result.states().get(SN_A).alarm());
-        assertFalse(result.states().containsKey(SN_B));
-        assertEquals(java.util.Set.of(SN_B), result.conflictingDevices());
+        assertEquals(1, result.states().get(SN_B).alarm());
+        assertEquals(Map.of(SN_B, List.of("alarmStatus")), result.conflictingFields());
 
         result = XSenseStationReport.resolve(reported("""
                 {"state":{"reported":{
@@ -110,7 +112,7 @@ class XSenseStationReportTest {
                 """), twoDetectors());
         assertEquals(new XSenseDeviceState(1, 0, -1, -1), result.states().get(SN_A));
         assertEquals(new XSenseDeviceState(1, 1, -1, -1), result.states().get(SN_B));
-        assertTrue(result.conflictingDevices().isEmpty());
+        assertTrue(result.conflictingFields().isEmpty());
     }
 
     @Test
@@ -182,5 +184,103 @@ class XSenseStationReportTest {
                 """), twoDetectors());
         assertTrue(result.states().isEmpty());
         assertEquals(0, result.unknownRecords() + result.conflictingRecords());
+    }
+
+    // === Value conflicts versus identity conflicts ===
+
+    private static List<Device> singleDevice() {
+        return List.of(device("sn", "idA"));
+    }
+
+    /**
+     * Reproduction: one inventory device reported twice, by deviceSn in "devs" and by deviceId as
+     * flat record. The identity is unique, only the signal strength differs.
+     */
+    @Test
+    void uniqueIdentityKeepsTheAlarmAndOnlyTheContradictingFieldIsUnknown() {
+        var result = XSenseStationReport.resolve(reported("""
+                {"state":{"reported":{"devs":{"sn":{"online":1,"alarmStatus":1,"rfLevel":2}},
+                  "idA":{"alarmStatus":1,"rfLevel":3}}}}
+                """), singleDevice());
+        XSenseDeviceState state = result.states().get("sn");
+        assertNotNull(state);
+        assertEquals(1, state.online());
+        assertEquals(1, state.alarm());
+        assertEquals(-1, state.signal());
+        assertEquals(Map.of("sn", List.of("rfLevel")), result.conflictingFields());
+        assertEquals(0, result.conflictingRecords());
+    }
+
+    @Test
+    void contradictingAlarmReportsNeverYieldNoAlarm() {
+        for (String reports : List.of("""
+                {"devs":{"sn":{"online":1,"alarmStatus":0}},"idA":{"alarmStatus":1}}
+                """, """
+                {"idA":{"alarmStatus":1},"devs":{"sn":{"online":1,"alarmStatus":"0"}}}
+                """, """
+                {"devs":{"sn":{"online":1,"alarmStatus":1}},"idA":{"status":{"alarmStatus":"0"}}}
+                """)) {
+            var result = XSenseStationReport.resolve(reported("{\"state\":{\"reported\":" + reports + "}}"),
+                    singleDevice());
+            assertEquals(1, result.states().get("sn").alarm(), reports);
+            assertEquals(List.of("alarmStatus"), result.conflictingFields().get("sn"), reports);
+        }
+    }
+
+    @Test
+    void offlineReportStillLocksTheDevice() {
+        var result = XSenseStationReport.resolve(reported("""
+                {"state":{"reported":{"devs":{"sn":{"online":1,"alarmStatus":1}},"idA":{"onLine":0}}}}
+                """), singleDevice());
+        assertEquals(0, result.states().get("sn").online());
+        assertEquals(1, result.states().get("sn").alarm());
+    }
+
+    /**
+     * Three partial records of one device (devs by serial, flat by deviceId, flat record naming the
+     * device in a field) in all six orders: the signal conflict found in any order stays unknown.
+     */
+    @Test
+    void conflictOfThreePartialRecordsIsIndependentOfTheirOrder() {
+        String devs = "\"devs\":{\"sn\":{\"online\":1,\"rfLevel\":2}}";
+        String byId = "\"idA\":{\"rfLevel\":3,\"alarmStatus\":1}";
+        String byField = "\"rec\":{\"deviceId\":\"idA\",\"rfLevel\":2,\"batInfo\":3}";
+        List<List<String>> orders = List.of(List.of(devs, byId, byField), List.of(devs, byField, byId),
+                List.of(byId, devs, byField), List.of(byId, byField, devs), List.of(byField, devs, byId),
+                List.of(byField, byId, devs));
+        for (List<String> order : orders) {
+            var result = XSenseStationReport.resolve(
+                    reported("{\"state\":{\"reported\":{" + String.join(",", order) + "}}}"), singleDevice());
+            assertEquals(new XSenseDeviceState(1, 1, 3, -1), result.states().get("sn"), order.toString());
+            assertEquals(List.of("rfLevel"), result.conflictingFields().get("sn"), order.toString());
+        }
+    }
+
+    // === Duplicate serial numbers in the inventory ===
+
+    /**
+     * Reproduction: two children share deviceSn "sn" (ids idA and idB), only idA reports an alarm.
+     * A third child with a unique identity must still get its values.
+     */
+    @Test
+    void sharedSerialNumberIsNotPublishedForAnyOfItsChildren() {
+        List<Device> children = List.of(device("sn", "idA"), device("sn", "idB"), device("sn3", "idC"));
+        var result = XSenseStationReport.resolve(reported("""
+                {"state":{"reported":{"idA":{"online":1,"alarmStatus":1},
+                  "devs":{"sn":{"online":1,"alarmStatus":1},"sn3":{"online":1,"alarmStatus":0,"batInfo":3}}}}}
+                """), children);
+        assertFalse(result.states().containsKey("sn"));
+        assertEquals(Set.of("sn"), result.ambiguousSerials());
+        assertEquals(new XSenseDeviceState(1, 0, 3, -1), result.states().get("sn3"));
+        // The devs record keyed by the shared serial number cannot be assigned at all
+        assertEquals(1, result.conflictingRecords());
+    }
+
+    @Test
+    void detectsSharedSerialNumbers() {
+        assertEquals(Set.of("sn"), XSenseStationReport
+                .ambiguousSerials(List.of(device("sn", "a"), device("sn", "b"), device("other", "c"))));
+        assertEquals(Set.of(), XSenseStationReport.ambiguousSerials(twoDetectors()));
+        assertEquals(Set.of(), XSenseStationReport.ambiguousSerials(null));
     }
 }

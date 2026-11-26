@@ -126,12 +126,12 @@ public class XSenseCognitoSrp {
             String timestamp) throws XSenseApiException {
         String username = getParameter(challengeParameters, PARAM_USERNAME);
         String userIdForSrp = getParameter(challengeParameters, PARAM_USER_ID_FOR_SRP);
-        String saltHex = getParameter(challengeParameters, PARAM_SALT);
-        String srpBHex = getParameter(challengeParameters, PARAM_SRP_B);
+        String saltHex = hexParameter(challengeParameters, PARAM_SALT);
+        BigInteger srpB = new BigInteger(hexParameter(challengeParameters, PARAM_SRP_B), 16);
         String secretBlock = getParameter(challengeParameters, PARAM_SECRET_BLOCK);
+        byte[] secretBlockBytes = base64Parameter(secretBlock, PARAM_SECRET_BLOCK);
 
-        byte[] hkdf = passwordAuthenticationKey(userIdForSrp, password, new BigInteger(srpBHex, 16), saltHex);
-        byte[] secretBlockBytes = Base64.getDecoder().decode(secretBlock);
+        byte[] hkdf = passwordAuthenticationKey(userIdForSrp, password, srpB, saltHex);
 
         byte[] message = concat(poolName.getBytes(StandardCharsets.UTF_8),
                 userIdForSrp.getBytes(StandardCharsets.UTF_8), secretBlockBytes,
@@ -182,12 +182,43 @@ public class XSenseCognitoSrp {
         return key;
     }
 
+    // Upper bound for hexadecimal challenge values; SRP_B is below N (768 hex digits), salts are short
+    private static final int MAX_HEX_LENGTH = 1024;
+    // Upper bound for the encoded secret block
+    private static final int MAX_SECRET_BLOCK_LENGTH = 16384;
+
+    /*
+     * The challenge parameters are validated before use: a malformed challenge must end in a
+     * controlled XSenseApiException (a communication error with retry), not in a runtime exception.
+     * The messages name the parameter only, never its value.
+     */
     private static String getParameter(Map<String, String> parameters, String name) throws XSenseApiException {
         String value = parameters.get(name);
-        if (value == null || value.isEmpty()) {
+        if (value == null || value.isBlank()) {
             throw new XSenseApiException("Cognito challenge parameter missing: " + name);
         }
         return value;
+    }
+
+    private static String hexParameter(Map<String, String> parameters, String name) throws XSenseApiException {
+        String value = getParameter(parameters, name);
+        if (value.length() > MAX_HEX_LENGTH || !value.matches("[0-9a-fA-F]+")) {
+            throw new XSenseApiException("Cognito challenge parameter " + name + " is not a valid hexadecimal value");
+        }
+        return value;
+    }
+
+    private static byte[] base64Parameter(String value, String name) throws XSenseApiException {
+        byte[] bytes;
+        try {
+            bytes = value.length() > MAX_SECRET_BLOCK_LENGTH ? new byte[0] : Base64.getDecoder().decode(value);
+        } catch (IllegalArgumentException e) {
+            bytes = new byte[0];
+        }
+        if (bytes.length == 0) {
+            throw new XSenseApiException("Cognito challenge parameter " + name + " is not a valid Base64 value");
+        }
+        return bytes;
     }
 
     private static byte[] randomBytes(SecureRandom random, int count) {

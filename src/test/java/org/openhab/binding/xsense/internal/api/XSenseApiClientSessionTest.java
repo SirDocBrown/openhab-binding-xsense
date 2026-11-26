@@ -120,6 +120,53 @@ class XSenseApiClientSessionTest {
         assertEquals(3600, XSenseApiClient.tokenValidity(JsonParser.parseString("3600.0")));
     }
 
+    // === Cognito SRP challenge ===
+
+    @ParameterizedTest
+    @ValueSource(strings = { //
+            "\"zz-not-hex\"|\"a1b2c3\"|\"c2VjcmV0\"", // SRP_B not hexadecimal
+            "\"\"|\"a1b2c3\"|\"c2VjcmV0\"", // SRP_B empty
+            "null|\"a1b2c3\"|\"c2VjcmV0\"", // SRP_B missing
+            "{\"x\":1}|\"a1b2c3\"|\"c2VjcmV0\"", // SRP_B object
+            "\"0\"|\"a1b2c3\"|\"c2VjcmV0\"", // SRP_B mod N is zero
+            "\"5a7b\"|\"salt!\"|\"c2VjcmV0\"", // SALT not hexadecimal
+            "\"5a7b\"|\" \"|\"c2VjcmV0\"", // SALT blank
+            "\"5a7b\"|\"a1b2c3\"|\"%%%not-base64\"", // SECRET_BLOCK not Base64
+            "\"5a7b\"|\"a1b2c3\"|\"\"", // SECRET_BLOCK empty
+            "\"5a7b\"|\"a1b2c3\"|[1,2]" }) // SECRET_BLOCK array
+    void malformedChallengeIsAControlledCommunicationError(String parameters) {
+        String[] values = parameters.split("\\|");
+        cloud.then("cognito:InitiateAuth/srp", srpChallenge(values[0], values[1], values[2]));
+        XSenseApiException error = assertThrows(XSenseApiException.class,
+                () -> client.login("user@example.invalid", "password"));
+        assertFalse(error.isAuthenticationFailure());
+        assertFalse(client.isLoggedIn());
+        // The challenge was not answered and its content is not part of the message
+        assertFalse(cloud.endpoints().contains("cognito:RespondToAuthChallenge"));
+        String message = String.valueOf(error.getMessage());
+        for (String secret : List.of("zz-not-hex", "salt!", "%%%not-base64", "password", "user@example.invalid")) {
+            assertFalse(message.contains(secret), message);
+        }
+    }
+
+    @Test
+    void validChallengeAfterAMalformedOneLogsIn() throws XSenseApiException {
+        cloud.then("cognito:InitiateAuth/srp", srpChallenge("\"not-hex\"", "\"a1b2c3\"", "\"c2VjcmV0\""));
+        assertThrows(XSenseApiException.class, () -> client.login("user@example.invalid", "password"));
+        client.login("user@example.invalid", "password");
+        assertTrue(client.isLoggedIn());
+        assertEquals(1, cloud.endpoints().stream().filter("cognito:RespondToAuthChallenge"::equals).count());
+    }
+
+    @Test
+    void rejectedCredentialsRemainAnAuthenticationFailure() {
+        cloud.then("cognito:RespondToAuthChallenge", new XSenseHttpTransport.Response(400,
+                "{\"__type\":\"NotAuthorizedException\",\"message\":\"Incorrect username or password.\"}"));
+        XSenseApiException error = assertThrows(XSenseApiException.class,
+                () -> client.login("user@example.invalid", "password"));
+        assertTrue(error.isAuthenticationFailure());
+    }
+
     // === Station shadow ===
 
     @Test

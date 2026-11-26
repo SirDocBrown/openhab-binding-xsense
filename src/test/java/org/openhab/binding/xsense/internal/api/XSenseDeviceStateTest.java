@@ -14,6 +14,8 @@ package org.openhab.binding.xsense.internal.api;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 
 import com.google.gson.JsonObject;
@@ -145,11 +147,58 @@ class XSenseDeviceStateTest {
     }
 
     @Test
-    void mergeCombinesComplementaryRecordsAndRejectsContradictions() {
-        XSenseDeviceState values = new XSenseDeviceState(1, -1, 3, -1);
-        XSenseDeviceState alarm = new XSenseDeviceState(-1, 1, -1, 2);
-        assertEquals(new XSenseDeviceState(1, 1, 3, 2), XSenseDeviceState.merge(values, alarm));
-        assertEquals(values, XSenseDeviceState.merge(values, new XSenseDeviceState(1, -1, 3, -1)));
-        assertNull(XSenseDeviceState.merge(values, new XSenseDeviceState(0, -1, -1, -1)));
+    void combineTakesComplementaryAndEqualValues() {
+        var combined = XSenseDeviceState.combine(
+                List.of(new XSenseDeviceState(1, -1, 3, -1), new XSenseDeviceState(-1, 1, 3, 2)));
+        assertEquals(new XSenseDeviceState(1, 1, 3, 2), combined.state());
+        assertEquals(List.of(), combined.conflicts());
+        assertEquals(XSenseDeviceState.UNKNOWN, XSenseDeviceState.combine(List.of()).state());
+    }
+
+    @Test
+    void combineResolvesConflictsPerField() {
+        var combined = XSenseDeviceState.combine(List.of(new XSenseDeviceState(1, 0, 3, 2, 5, 9, 0, 1),
+                new XSenseDeviceState(0, 2, 1, 3, 6, 10, 1, 0)));
+        // online: offline wins, alarm: highest code wins, all others unknown
+        assertEquals(new XSenseDeviceState(0, 2, -1, -1, -1, -1, -1, -1), combined.state());
+        assertEquals(List.of("online", "alarmStatus", "batInfo", "rfLevel", "coPpm", "coPpmPeak", "isOpen", "isMoved"),
+                combined.conflicts());
+    }
+
+    @Test
+    void conflictFoundOnceIsNotResolvedByFurtherRecords() {
+        XSenseDeviceState a = new XSenseDeviceState(1, 1, -1, 2);
+        XSenseDeviceState b = new XSenseDeviceState(-1, 0, -1, 3);
+        XSenseDeviceState c = new XSenseDeviceState(1, 0, 3, 2);
+        for (List<XSenseDeviceState> order : List.of(List.of(a, b, c), List.of(a, c, b), List.of(b, a, c),
+                List.of(b, c, a), List.of(c, a, b), List.of(c, b, a))) {
+            var combined = XSenseDeviceState.combine(order);
+            assertEquals(new XSenseDeviceState(1, 1, 3, -1), combined.state(), order.toString());
+            assertEquals(List.of("alarmStatus", "rfLevel"), combined.conflicts(), order.toString());
+        }
+    }
+
+    // === CO peak value ===
+
+    @Test
+    void decodesThePeakValueInAllForms() {
+        var states = json("""
+                {"STATUS_PEAK":{"online":1,"status":{"coPpm":3,"peak":{"coPpmPeak":17}}},
+                 "RECORD_PEAK":{"coPpm":3,"peak":{"coPpmPeak":17}},
+                 "STATUS_FLAT":{"status":{"coPpm":"3","coPpmPeak":"17"}},
+                 "FLAT":{"coPpm":3,"coPpmPeak":17},
+                 "ZERO":{"status":{"coPpm":0,"peak":{"coPpmPeak":0}}},
+                 "NONE":{"online":1,"alarmStatus":1,"coPpm":3}}
+                """);
+        for (String key : List.of("STATUS_PEAK", "RECORD_PEAK", "STATUS_FLAT", "FLAT")) {
+            assertEquals(3, XSenseDeviceState.read(states, key).coPpm(), key);
+            assertEquals(17, XSenseDeviceState.read(states, key).coPeak(), key);
+        }
+        assertEquals(0, XSenseDeviceState.read(states, "ZERO").coPeak());
+        assertEquals(0, XSenseDeviceState.read(states, "ZERO").coPpm());
+        XSenseDeviceState none = XSenseDeviceState.read(states, "NONE");
+        assertEquals(-1, none.coPeak());
+        assertEquals(3, none.coPpm());
+        assertEquals(1, none.alarm());
     }
 }

@@ -14,6 +14,7 @@ package org.openhab.binding.xsense.internal.api;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -48,8 +49,12 @@ import com.google.gson.JsonObject;
  * not prevent the assignment, as records may carry further ids, e.g. of the station.</li>
  * <li>Records whose identifiers name no child are ignored (unknown devices); in the flat form only
  * objects whose key or identifier fields name a child are device records at all.</li>
- * <li>Several records for the same child are combined field by field. If they report different
- * values for the same field, the child gets no state from this report.</li>
+ * <li>Several records for the same child are combined field by field, see
+ * {@link XSenseDeviceState#combine(List)}: identity conflicts (above) discard records, value
+ * conflicts only affect the contradicting fields.</li>
+ * <li>States are published per deviceSn, the serial number a thing is configured with. If several
+ * children of the inventory share a deviceSn, none of them gets a state, as a thing could not tell
+ * whose values it receives.</li>
  * </ol>
  *
  * @author Andreas Rothstein - Initial contribution
@@ -66,12 +71,30 @@ public final class XSenseStationReport {
      * Result of the assignment.
      *
      * @param states reported state per child, keyed by deviceSn
-     * @param conflictingDevices deviceSn of the children whose records contradict each other
+     * @param conflictingFields per deviceSn the fields whose values contradicted each other
+     * @param ambiguousSerials serial numbers shared by several children of the inventory
      * @param unknownRecords number of records for devices that are not part of the station
      * @param conflictingRecords number of records discarded because of contradicting identifiers
      */
-    public record Result(Map<String, XSenseDeviceState> states, Set<String> conflictingDevices, int unknownRecords,
-            int conflictingRecords) {
+    public record Result(Map<String, XSenseDeviceState> states, Map<String, List<String>> conflictingFields,
+            Set<String> ambiguousSerials, int unknownRecords, int conflictingRecords) {
+    }
+
+    /**
+     * Returns the serial numbers (deviceSn) used by more than one child of a station inventory.
+     */
+    public static Set<String> ambiguousSerials(@Nullable List<Device> children) {
+        Set<String> seen = new HashSet<>();
+        Set<String> ambiguous = new LinkedHashSet<>();
+        if (children != null) {
+            for (Device child : children) {
+                String serial = child.deviceSn;
+                if (serial != null && !serial.isBlank() && !seen.add(serial)) {
+                    ambiguous.add(serial);
+                }
+            }
+        }
+        return ambiguous;
     }
 
     private XSenseStationReport() {
@@ -159,28 +182,22 @@ public final class XSenseStationReport {
             }
         }
 
+        Set<String> ambiguousSerials = ambiguousSerials(children);
         Map<String, XSenseDeviceState> states = new HashMap<>();
-        Set<String> conflictingDevices = new LinkedHashSet<>();
+        Map<String, List<String>> conflictingFields = new HashMap<>();
         for (Map.Entry<Device, List<XSenseDeviceState>> entry : records.entrySet()) {
             String serial = entry.getKey().deviceSn;
-            if (serial == null || serial.isBlank()) {
+            if (serial == null || serial.isBlank() || ambiguousSerials.contains(serial)) {
                 continue;
             }
-            @Nullable
-            XSenseDeviceState combined = XSenseDeviceState.UNKNOWN;
-            for (XSenseDeviceState state : entry.getValue()) {
-                combined = XSenseDeviceState.merge(combined, state);
-                if (combined == null) {
-                    break;
-                }
-            }
-            if (combined == null) {
-                conflictingDevices.add(serial);
-            } else {
-                states.put(serial, combined);
+            XSenseDeviceState.Combined combined = XSenseDeviceState.combine(entry.getValue());
+            states.put(serial, combined.state());
+            if (!combined.conflicts().isEmpty()) {
+                conflictingFields.put(serial, combined.conflicts());
             }
         }
-        return new Result(Map.copyOf(states), Set.copyOf(conflictingDevices), unknown, conflicting);
+        return new Result(Map.copyOf(states), Map.copyOf(conflictingFields), Set.copyOf(ambiguousSerials), unknown,
+                conflicting);
     }
 
     private static Set<String> identifiers(String key, JsonObject record) {

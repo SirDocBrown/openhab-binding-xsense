@@ -15,9 +15,11 @@ package org.openhab.binding.xsense.internal.handler;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
+import org.openhab.binding.xsense.internal.api.XSenseStationReport;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Device;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Station;
 import org.openhab.binding.xsense.internal.config.XSenseStationConfiguration;
@@ -116,10 +118,15 @@ public class XSenseStationHandler extends BaseBridgeHandler {
         }
 
         List<Device> devices = station.devices;
+        Set<String> ambiguousSerials = XSenseStationReport.ambiguousSerials(devices);
         for (Thing thing : getThing().getThings()) {
             ThingHandler handler = thing.getHandler();
             if (handler instanceof XSenseSensorHandler sensorHandler) {
-                if (online) {
+                if (online && ambiguousSerials.contains(sensorHandler.getDeviceSn())) {
+                    // Several children share the configured serial number: the values of neither
+                    // child can be published on this thing
+                    sensorHandler.ambiguousDevice();
+                } else if (online) {
                     sensorHandler.updateFromInventory(findDevice(devices, sensorHandler.getDeviceSn()));
                 } else {
                     // An offline station reports no child states; the children must stay offline
