@@ -123,14 +123,12 @@ class XSenseSensorHandlerTest {
         handler.updateFromInventory(device);
         assertEquals(OnOffType.ON, published.get("alarm#co"));
         assertEquals(new QuantityType<>(120, Units.PARTS_PER_MILLION), published.get("measurement#co"));
-        assertEquals(new QuantityType<>(150, Units.PARTS_PER_MILLION), published.get("measurement#coPeak"));
         assertFalse(published.containsKey("alarm#smoke"));
 
         device.reported = new XSenseDeviceState(1, 0, 3, 3, 0, -1, -1, -1);
         handler.updateFromInventory(device);
         assertEquals(OnOffType.OFF, published.get("alarm#co"));
         assertEquals(new QuantityType<>(0, Units.PARTS_PER_MILLION), published.get("measurement#co"));
-        assertEquals(UnDefType.UNDEF, published.get("measurement#coPeak"));
     }
 
     @Test

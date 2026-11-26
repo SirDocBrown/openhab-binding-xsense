@@ -108,12 +108,16 @@ Sensor things have the following channels:
 | `alarm#heat`         | Switch               | R          | `heat`        | `ON` while the detector reports a heat alarm                                      |
 | `alarm#water`        | Switch               | R          | `water`       | `ON` while the detector reports a water leak                                      |
 | `measurement#co`     | Number:Dimensionless | R          | `co`, `combo` | Current carbon monoxide concentration in ppm                                      |
-| `measurement#coPeak` | Number:Dimensionless | R          | `co`, `combo` | Highest carbon monoxide concentration recorded by the detector, in ppm (advanced) |
+| `measurement#coPeak` | Number:Dimensionless | R          | `co`, `combo` | Highest carbon monoxide concentration recorded by the detector, in ppm (advanced). Only present when the detector reports a peak value, see below |
 | `state#contact`      | Contact              | R          | `door`        | `OPEN` or `CLOSED`                                                                |
 | `state#motion`       | Switch               | R          | `motion`      | `ON` while the sensor detects motion                                              |
 | `device#battery`     | Number               | R          | all           | Battery level in percent, reported in four steps (0, 33, 67, 100)                 |
 | `device#lowBattery`  | Switch               | R          | all           | `ON` when the battery level is at one of the two lowest steps                     |
 | `device#signal`      | Number               | R          | all           | Radio signal strength between sensor and base station (0 = none, 3 = best)        |
+
+The base station does not report a CO peak value for every detector (e.g. not for the XC01-M).
+The `measurement#coPeak` channel is therefore added when a detector reports a peak value for the first time.
+A `measurement#coPeak` channel created by an earlier version is removed when the detector reports no peak value, unless an item is linked to it.
 
 Missing or invalid values are set to `UNDEF`.
 When the sensor reports that it is not connected to the base station, the thing goes offline and all channels become `UNDEF`.
