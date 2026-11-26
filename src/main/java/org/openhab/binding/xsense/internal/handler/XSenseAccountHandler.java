@@ -12,8 +12,9 @@
  */
 package org.openhab.binding.xsense.internal.handler;
 
-import static org.openhab.binding.xsense.internal.XSenseBindingConstants.STATION_TYPE_SBS50;
+import static org.openhab.binding.xsense.internal.XSenseBindingConstants.*;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -25,10 +26,11 @@ import java.util.function.IntSupplier;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
-import org.eclipse.jetty.client.HttpClient;
 import org.openhab.binding.xsense.internal.api.XSenseApiClient;
 import org.openhab.binding.xsense.internal.api.XSenseApiException;
 import org.openhab.binding.xsense.internal.api.XSenseDeviceState;
+import org.openhab.binding.xsense.internal.api.XSenseHttpTransport;
+import org.openhab.binding.xsense.internal.api.XSenseStationReport;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Device;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.House;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Station;
@@ -41,6 +43,7 @@ import org.openhab.core.thing.ChannelUID;
 import org.openhab.core.thing.Thing;
 import org.openhab.core.thing.ThingStatus;
 import org.openhab.core.thing.ThingStatusDetail;
+import org.openhab.core.thing.ThingTypeUID;
 import org.openhab.core.thing.binding.BaseBridgeHandler;
 import org.openhab.core.thing.binding.ThingHandler;
 import org.openhab.core.thing.binding.ThingHandlerService;
@@ -49,12 +52,14 @@ import org.openhab.core.types.RefreshType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.gson.JsonObject;
+
 /**
  * The {@link XSenseAccountHandler} manages the connection to the X-Sense cloud account: it owns the
  * API client, performs the login and polls the house/station/device inventory.
  *
  * @author Markus Michels - Initial contribution
- * @author Andreas Rothstein - Shared HTTP client, non-blocking dispose
+ * @author Andreas Rothstein - Non-blocking dispose, station report assignment
  */
 @NonNullByDefault
 public class XSenseAccountHandler extends BaseBridgeHandler {
@@ -102,9 +107,13 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     // Latest inventory snapshot, replaced atomically after each poll
     private volatile Inventory inventory = Inventory.EMPTY;
 
-    public XSenseAccountHandler(Bridge bridge, HttpClient httpClient, IntSupplier defaultRefreshInterval) {
+    public XSenseAccountHandler(Bridge bridge, XSenseHttpTransport transport, IntSupplier defaultRefreshInterval) {
+        this(bridge, new XSenseApiClient(transport), defaultRefreshInterval);
+    }
+
+    XSenseAccountHandler(Bridge bridge, XSenseApiClient apiClient, IntSupplier defaultRefreshInterval) {
         super(bridge);
-        apiClient = new XSenseApiClient(httpClient);
+        this.apiClient = apiClient;
         this.defaultRefreshInterval = defaultRefreshInterval;
     }
 
@@ -207,7 +216,7 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
      * Performs the Cognito login and, on success, starts inventory polling. On failure, either
      * gives up (bad credentials) or schedules a reconnect with exponential backoff.
      */
-    private synchronized void connect() {
+    synchronized void connect() {
         if (disposed) {
             return;
         }
@@ -264,7 +273,7 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
      * home handlers and the discovery service. On an authentication failure, stops polling and
      * schedules a reconnect; other failures leave polling running for the next attempt.
      */
-    private synchronized void poll() {
+    synchronized void poll() {
         if (disposed || !apiClient.isLoggedIn()) {
             // Initial login still pending or session lost, connect()/reconnect handles this case
             return;
@@ -303,6 +312,13 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             if (listener != null) {
                 listener.onCloudDataChanged();
             }
+        } catch (RuntimeException e) {
+            // Must not escape: an exception thrown by a periodic job cancels all further polls
+            logger.warn("{}: unexpected error while polling the X-Sense cloud", logId, e);
+            if (!disposed) {
+                updateStatus(ThingStatusDetail.COMMUNICATION_ERROR,
+                        statusText("offline.communication-error", e.getClass().getSimpleName()));
+            }
         } catch (XSenseApiException e) {
             logger.debug("{}: inventory poll failed: {}", logId, e.getMessage());
             if (disposed) {
@@ -328,28 +344,90 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     private void readSensorStates(String region, Station station) throws XSenseApiException {
         String serial = station.stationSn;
         List<Device> devices = station.devices;
-        if (!STATION_TYPE_SBS50.equals(station.category) || !Integer.valueOf(1).equals(station.onLine)
-                || devices == null || devices.isEmpty() || serial == null) {
+        if (!STATION_TYPE_SBS50.equals(station.category) || station.online() != 1 || devices == null
+                || devices.isEmpty() || serial == null) {
             return;
         }
+        String logId = logId();
         try {
-            var states = apiClient.getDeviceStates(region, serial);
-            logger.debug("{}: station {} reports state for device(s) {}", logId(), serial, states.keySet());
+            JsonObject reported = apiClient.getDeviceStates(region, serial);
+            XSenseStationReport.Result result = XSenseStationReport.resolve(reported, devices);
+            if (reported.size() == 0) {
+                logger.debug("{}: station {} has no reported state", logId, serial);
+            }
+            if (result.unknownRecords() > 0 || result.conflictingRecords() > 0) {
+                logger.debug("{}: station {}: ignored {} record(s) of unknown devices, {} with conflicting ids", logId,
+                        serial, result.unknownRecords(), result.conflictingRecords());
+            }
             for (Device device : devices) {
                 String deviceSerial = device.deviceSn;
-                if (deviceSerial != null) {
-                    // Raw device state as reported by the station, needed to add support for further models
-                    logger.debug("{}: station {}, device {} ({}): {}", logId(), serial, deviceSerial, device.deviceType,
-                            states.get(deviceSerial));
-                    device.reported = XSenseDeviceState.read(states, deviceSerial);
+                if (deviceSerial == null) {
+                    continue;
                 }
+                XSenseDeviceState state = result.states().get(deviceSerial);
+                device.reported = state != null ? state : XSenseDeviceState.UNKNOWN;
+                // Diagnosis without the device payload: model, assignment result and missing fields
+                String model = device.deviceType;
+                logger.debug("{}: station {}, model {}: {}", logId, serial, model,
+                        describe(state, result.conflictingDevices().contains(deviceSerial),
+                                model != null ? thingTypeForDeviceType(model) : null));
             }
         } catch (XSenseApiException e) {
             if (e.isAuthenticationFailure()) {
                 throw e;
             }
-            logger.debug("{}: failed to read station status: {}", logId(), e.getMessage());
+            logger.debug("{}: failed to read station status: {}", logId, e.getMessage());
         }
+    }
+
+    /**
+     * Summarizes the report of one device for the debug log: the assignment result and the names of
+     * the fields the model is expected to report but did not.
+     */
+    static String describe(@Nullable XSenseDeviceState state, boolean conflicting, @Nullable ThingTypeUID type) {
+        if (conflicting) {
+            return "contradicting records, ignored";
+        }
+        if (state == null) {
+            return "no report";
+        }
+        if (state.online() == 0) {
+            return "reported offline";
+        }
+        List<String> missing = missingFields(state, type);
+        return missing.isEmpty() ? "complete" : "missing " + String.join(", ", missing);
+    }
+
+    static List<String> missingFields(XSenseDeviceState state, @Nullable ThingTypeUID type) {
+        List<String> missing = new ArrayList<>();
+        if (state.online() < 0) {
+            missing.add("online");
+        }
+        boolean hasAlarm = !THING_TYPE_DOOR.equals(type) && !THING_TYPE_MOTION.equals(type);
+        if (hasAlarm && state.alarm() < 0) {
+            missing.add("alarmStatus");
+        }
+        if (state.battery() < 0) {
+            missing.add("batInfo");
+        }
+        if (state.signal() < 0) {
+            missing.add("rfLevel");
+        }
+        if (THING_TYPE_CO.equals(type) || THING_TYPE_COMBO.equals(type)) {
+            if (state.coPpm() < 0) {
+                missing.add("coPpm");
+            }
+            if (state.coPeak() < 0) {
+                missing.add("coPpmPeak");
+            }
+        }
+        if (THING_TYPE_DOOR.equals(type) && state.open() < 0) {
+            missing.add("isOpen");
+        }
+        if (THING_TYPE_MOTION.equals(type) && state.motion() < 0) {
+            missing.add("isMoved");
+        }
+        return missing;
     }
 
     /**
@@ -400,6 +478,14 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     private static String statusText(String key, @Nullable String argument) {
         String safeArgument = argument == null ? "" : argument.replace('"', '\'');
         return "@text/" + key + " [\"" + safeArgument + "\"]";
+    }
+
+    /**
+     * Returns whether the periodic inventory poll is scheduled.
+     */
+    boolean isPolling() {
+        ScheduledFuture<?> job = pollJob;
+        return job != null && !job.isDone();
     }
 
     private static void stopJob(@Nullable ScheduledFuture<?> job) {

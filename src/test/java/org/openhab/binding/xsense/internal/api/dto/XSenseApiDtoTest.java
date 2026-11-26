@@ -105,7 +105,7 @@ public class XSenseApiDtoTest {
         Station station = stations.get(0);
         assertEquals("SN123", station.stationSn);
         assertEquals("SBS50", station.category);
-        assertEquals(Integer.valueOf(1), station.onLine);
+        assertEquals(1, station.online());
         List<Device> devices = station.devices;
         assertNotNull(devices);
         assertEquals(2, devices.size());
@@ -182,5 +182,18 @@ public class XSenseApiDtoTest {
         assertNull(credentials.secretAccessKey);
         assertNull(credentials.sessionToken);
         assertNull(credentials.expiration);
+    }
+
+    @Test
+    public void stationOnlineAcceptsNumberStringAndBoolean() {
+        String json = """
+                {"stations":[{"stationSn":"S1","onLine":1},{"stationSn":"S2","onLine":"0"},
+                  {"stationSn":"S3","onLine":true},{"stationSn":"S4"},{"stationSn":"S5","onLine":"x"}]}
+                """;
+        StationList stationList = gson.fromJson(json, StationList.class);
+        assertNotNull(stationList);
+        List<Station> stations = stationList.stations;
+        assertNotNull(stations);
+        assertEquals(List.of(1, 0, 1, -1, -1), stations.stream().map(Station::online).toList());
     }
 }

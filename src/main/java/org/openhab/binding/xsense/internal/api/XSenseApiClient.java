@@ -16,6 +16,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -27,18 +28,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
-import org.eclipse.jetty.client.ContentResponse;
-import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.jetty.client.Request;
-import org.eclipse.jetty.client.StringRequestContent;
-import org.eclipse.jetty.http.HttpMethod;
-import org.eclipse.jetty.http.HttpStatus;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.ApiResponse;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.AwsCredentials;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.ClientInfo;
@@ -50,7 +42,7 @@ import org.slf4j.LoggerFactory;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonSyntaxException;
+import com.google.gson.JsonParseException;
 import com.google.gson.reflect.TypeToken;
 
 /**
@@ -93,11 +85,24 @@ public class XSenseApiClient {
     // errCode values indicating an expired/invalid session
     private static final Set<String> SESSION_EXPIRED_ERRORS = Set.of("10000008", "10000020");
 
-    private static final int REQUEST_TIMEOUT_SEC = 15;
     private static final long TOKEN_EXPIRY_MARGIN_SEC = 60;
+    // Cognito access tokens are valid between 5 minutes and 1 day; the lower bound used here only
+    // has to exceed the refresh margin so that a new token is not refreshed again immediately
+    static final long MIN_TOKEN_VALIDITY_SEC = TOKEN_EXPIRY_MARGIN_SEC + 1;
+    static final long MAX_TOKEN_VALIDITY_SEC = 86400;
+    private static final long DEFAULT_TOKEN_VALIDITY_SEC = 3600;
+
+    // Station shadows in the order the X-Sense app reads them; older firmware only provides "mainpage"
+    private static final List<String> STATION_SHADOWS = List.of("2nd_mainpage", "mainpage");
+    private static final int HTTP_OK = 200;
+    private static final int HTTP_BAD_REQUEST = 400;
+    private static final int HTTP_UNAUTHORIZED = 401;
+    private static final int HTTP_FORBIDDEN = 403;
+    private static final int HTTP_NOT_FOUND = 404;
 
     private final Logger logger = LoggerFactory.getLogger(XSenseApiClient.class);
-    private final HttpClient httpClient;
+    private final XSenseHttpTransport transport;
+    private final Clock clock;
     private final Gson gson = new Gson();
     private final Object sessionLock = new Object();
 
@@ -122,8 +127,16 @@ public class XSenseApiClient {
     private volatile @Nullable AwsCredentials awsCredentials;
     private volatile Instant awsCredentialsExpiry = Instant.EPOCH;
 
-    public XSenseApiClient(HttpClient httpClient) {
-        this.httpClient = httpClient;
+    public XSenseApiClient(XSenseHttpTransport transport) {
+        this(transport, Clock.systemUTC());
+    }
+
+    /**
+     * Creates a client with the given clock, used by tests to let tokens and credentials expire.
+     */
+    public XSenseApiClient(XSenseHttpTransport transport, Clock clock) {
+        this.transport = transport;
+        this.clock = clock;
     }
 
     /**
@@ -167,7 +180,7 @@ public class XSenseApiClient {
      */
     private AwsCredentials getAwsCredentials() throws XSenseApiException {
         AwsCredentials cached = awsCredentials;
-        if (cached != null && Instant.now().isBefore(awsCredentialsExpiry.minusSeconds(TOKEN_EXPIRY_MARGIN_SEC))) {
+        if (cached != null && clock.instant().isBefore(awsCredentialsExpiry.minusSeconds(TOKEN_EXPIRY_MARGIN_SEC))) {
             return cached;
         }
         return refreshAwsCredentials();
@@ -189,28 +202,43 @@ public class XSenseApiClient {
         return credentials;
     }
 
-    /** Reads one reported device map for all children of an SBS50. */
+    /**
+     * Reads the reported state of an SBS50 and its children from the station shadow.
+     *
+     * The "2nd_mainpage" shadow is read first and "mainpage" when it does not exist. Rejected AWS
+     * credentials are renewed once per call, so at most three shadow requests are sent.
+     *
+     * @return the "state.reported" object of the shadow, empty when the shadow only has a desired state
+     */
     public JsonObject getDeviceStates(String region, String stationSn) throws XSenseApiException {
         if (!region.matches("[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+") || !stationSn.matches("[A-Za-z0-9_-]+")) {
             throw new XSenseApiException("Invalid station shadow address");
         }
-        String url = shadowUrl(region, "SBS50" + stationSn, "2nd_mainpage");
-        ContentResponse response = readShadow(url, region, getAwsCredentials());
-        if (response.getStatus() == HttpStatus.NOT_FOUND_404) {
-            url = shadowUrl(region, "SBS50" + stationSn, "mainpage");
-            response = readShadow(url, region, getAwsCredentials());
+        AwsCredentials credentials = getAwsCredentials();
+        boolean credentialsRenewed = false;
+        int lastStatus = HTTP_NOT_FOUND;
+        for (String shadow : STATION_SHADOWS) {
+            String url = shadowUrl(region, "SBS50" + stationSn, shadow);
+            XSenseHttpTransport.Response response = readShadow(url, region, credentials);
+            if (!credentialsRenewed
+                    && (response.status() == HTTP_UNAUTHORIZED || response.status() == HTTP_FORBIDDEN)) {
+                credentialsRenewed = true;
+                credentials = refreshAwsCredentials();
+                response = readShadow(url, region, credentials);
+            }
+            lastStatus = response.status();
+            if (lastStatus == HTTP_NOT_FOUND) {
+                continue;
+            }
+            if (lastStatus != HTTP_OK) {
+                throw new XSenseApiException("Station shadow " + shadow + " returned HTTP " + lastStatus);
+            }
+            return XSenseStationReport.reported(fromJson(response.body(), JsonObject.class));
         }
-        if (response.getStatus() == HttpStatus.UNAUTHORIZED_401 || response.getStatus() == HttpStatus.FORBIDDEN_403) {
-            response = readShadow(url, region, refreshAwsCredentials());
-        }
-        if (response.getStatus() != HttpStatus.OK_200) {
-            throw new XSenseApiException("Station shadow returned HTTP " + response.getStatus());
-        }
-        JsonObject document = fromJson(response.getContentAsString(), JsonObject.class);
-        return XSenseDeviceState.devices(document);
+        throw new XSenseApiException("Station shadow returned HTTP " + lastStatus);
     }
 
-    private ContentResponse readShadow(String url, String mqttRegion, AwsCredentials credentials)
+    private XSenseHttpTransport.Response readShadow(String url, String mqttRegion, AwsCredentials credentials)
             throws XSenseApiException {
         String accessKeyId = credentials.accessKeyId;
         String secretAccessKey = credentials.secretAccessKey;
@@ -223,20 +251,15 @@ public class XSenseApiClient {
         headers.put("User-Agent", IOT_USER_AGENT);
         headers.put("X-Amz-Security-Token", sessionToken);
         Map<String, String> signature = new XSenseAwsSigV4(mqttRegion, IOT_SERVICE).sign("GET", URI.create(url),
-                headers, "", accessKeyId, secretAccessKey, Instant.now());
-        Request request = httpClient.newRequest(url).method(HttpMethod.GET).timeout(REQUEST_TIMEOUT_SEC,
-                TimeUnit.SECONDS);
-        // The signed headers must be sent exactly as signed; put() replaces client defaults such as the
-        // User-Agent. The Host header is set by the HTTP client itself.
-        request.headers(httpFields -> {
-            headers.forEach(httpFields::put);
-            signature.forEach((key, value) -> {
-                if (!"Host".equals(key)) {
-                    httpFields.put(key, value);
-                }
-            });
+                headers, "", accessKeyId, secretAccessKey, clock.instant());
+        // The signed headers must be sent exactly as signed; the Host header is set by the transport
+        Map<String, String> requestHeaders = new LinkedHashMap<>(headers);
+        signature.forEach((key, value) -> {
+            if (!"Host".equalsIgnoreCase(key)) {
+                requestHeaders.put(key, value);
+            }
         });
-        return send(request, url);
+        return transport.send("GET", url, requestHeaders, null);
     }
 
     /**
@@ -417,7 +440,7 @@ public class XSenseApiClient {
         if (accessToken == null) {
             throw new XSenseApiException("Not logged in", true);
         }
-        if (Instant.now().isBefore(accessTokenExpiry.minusSeconds(TOKEN_EXPIRY_MARGIN_SEC))) {
+        if (clock.instant().isBefore(accessTokenExpiry.minusSeconds(TOKEN_EXPIRY_MARGIN_SEC))) {
             return;
         }
         String clientId = cognitoClientId;
@@ -446,19 +469,65 @@ public class XSenseApiClient {
         }
     }
 
+    /**
+     * Validates a Cognito authentication result completely before taking it over, so that a
+     * malformed response leaves the previous session untouched and is reported as a controlled
+     * {@link XSenseApiException} instead of a runtime exception in the polling thread.
+     */
     private void parseAuthenticationResult(JsonObject result) throws XSenseApiException {
-        JsonElement token = result.get("AccessToken");
-        if (token == null || !token.isJsonPrimitive()) {
+        String newAccessToken = tokenValue(result, "AccessToken");
+        if (newAccessToken == null) {
             throw new XSenseApiException("Cognito response misses AccessToken");
         }
-        accessToken = token.getAsString();
-        JsonElement refresh = result.get("RefreshToken");
-        if (refresh != null && refresh.isJsonPrimitive()) {
-            refreshToken = refresh.getAsString();
+        String newRefreshToken = tokenValue(result, "RefreshToken");
+        long validity = tokenValidity(result.get("ExpiresIn"));
+        accessToken = newAccessToken;
+        if (newRefreshToken != null) {
+            // The refresh flow does not return a new refresh token, keep the existing one then
+            refreshToken = newRefreshToken;
         }
-        JsonElement expiresIn = result.get("ExpiresIn");
-        long expirySeconds = expiresIn != null && expiresIn.isJsonPrimitive() ? expiresIn.getAsLong() : 3600;
-        accessTokenExpiry = Instant.now().plusSeconds(expirySeconds);
+        accessTokenExpiry = clock.instant().plusSeconds(validity);
+    }
+
+    /**
+     * Returns a token as non-blank string, null when absent.
+     *
+     * @throws XSenseApiException when the token is present but not a non-blank string
+     */
+    static @Nullable String tokenValue(JsonObject result, String name) throws XSenseApiException {
+        JsonElement value = result.get(name);
+        if (value == null || value.isJsonNull()) {
+            return null;
+        }
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString() || value.getAsString().isBlank()) {
+            throw new XSenseApiException("Cognito response contains an invalid " + name);
+        }
+        return value.getAsString();
+    }
+
+    /**
+     * Returns the token validity in seconds: an integral JSON number between
+     * {@link #MIN_TOKEN_VALIDITY_SEC} and {@link #MAX_TOKEN_VALIDITY_SEC}; one hour when absent.
+     *
+     * @throws XSenseApiException for other types, fractions and values out of range
+     */
+    static long tokenValidity(@Nullable JsonElement expiresIn) throws XSenseApiException {
+        if (expiresIn == null || expiresIn.isJsonNull()) {
+            return DEFAULT_TOKEN_VALIDITY_SEC;
+        }
+        if (!expiresIn.isJsonPrimitive() || !expiresIn.getAsJsonPrimitive().isNumber()) {
+            throw new XSenseApiException("Cognito response contains an invalid ExpiresIn");
+        }
+        long seconds;
+        try {
+            seconds = expiresIn.getAsBigDecimal().longValueExact();
+        } catch (ArithmeticException | NumberFormatException e) {
+            throw new XSenseApiException("Cognito response contains an invalid ExpiresIn", e);
+        }
+        if (seconds < MIN_TOKEN_VALIDITY_SEC || seconds > MAX_TOKEN_VALIDITY_SEC) {
+            throw new XSenseApiException("Cognito response contains an ExpiresIn out of range: " + seconds);
+        }
+        return seconds;
     }
 
     private JsonObject cognitoCall(String target, JsonObject request) throws XSenseApiException {
@@ -475,10 +544,12 @@ public class XSenseApiClient {
         }
         JsonElement type = response.get("__type");
         if (type != null) {
-            String message = response.has("message") ? response.get("message").getAsString() : "";
-            boolean authFailure = type.getAsString().contains("NotAuthorized")
-                    || type.getAsString().contains("UserNotFound");
-            throw new XSenseApiException("Cognito error " + type.getAsString() + ": " + message, authFailure);
+            String typeName = type.isJsonPrimitive() ? type.getAsString() : type.toString();
+            JsonElement messageElement = response.get("message");
+            String message = messageElement != null && messageElement.isJsonPrimitive() ? messageElement.getAsString()
+                    : "";
+            boolean authFailure = typeName.contains("NotAuthorized") || typeName.contains("UserNotFound");
+            throw new XSenseApiException("Cognito error " + typeName + ": " + message, authFailure);
         }
         return response;
     }
@@ -487,51 +558,39 @@ public class XSenseApiClient {
 
     private String httpPost(String url, String body, String contentType, @Nullable String authToken,
             Map<String, String> additionalHeaders) throws XSenseApiException {
-        Request request = httpClient.newRequest(url).method(HttpMethod.POST)
-                .timeout(REQUEST_TIMEOUT_SEC, TimeUnit.SECONDS)
-                .body(new StringRequestContent(contentType, body, StandardCharsets.UTF_8));
-        request.headers(httpFields -> {
-            if (authToken != null) {
-                httpFields.put("Authorization", authToken);
-            }
-            additionalHeaders.forEach(httpFields::put);
-        });
-        ContentResponse response = send(request, url);
-        String content = response.getContentAsString();
-        if (response.getStatus() >= HttpStatus.BAD_REQUEST_400) {
-            // Cognito reports errors with HTTP 400 and a JSON body carrying the error type in "__type"
-            if (isCognitoError(content)) {
-                return content;
-            }
-            throw new XSenseApiException("HTTP " + response.getStatus() + " from " + url);
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("Content-Type", contentType);
+        if (authToken != null) {
+            headers.put("Authorization", authToken);
         }
-        return content;
+        headers.putAll(additionalHeaders);
+        XSenseHttpTransport.Response response = transport.send("POST", url, headers, body);
+        int status = response.status();
+        String content = response.body();
+        if (status >= 200 && status < 300) {
+            return content;
+        }
+        // Cognito reports errors with HTTP 400 and a JSON body carrying the error type in "__type"
+        if (status == HTTP_BAD_REQUEST && isCognitoError(content)) {
+            return content;
+        }
+        // Redirects are not followed (credentials must not be forwarded) and are errors as well
+        throw new XSenseApiException("HTTP " + status + " from " + url);
     }
 
     private boolean isCognitoError(String content) {
         try {
             JsonObject json = gson.fromJson(content, JsonObject.class);
             return json != null && json.has("__type");
-        } catch (JsonSyntaxException e) {
+        } catch (JsonParseException | ClassCastException | IllegalStateException e) {
             return false;
-        }
-    }
-
-    private static ContentResponse send(Request request, String url) throws XSenseApiException {
-        try {
-            return request.send();
-        } catch (TimeoutException | ExecutionException e) {
-            throw new XSenseApiException("Request to " + url + " failed: " + e.getMessage(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new XSenseApiException("Request to " + url + " interrupted", e);
         }
     }
 
     private <T> @Nullable T fromJson(String json, Class<T> clazz) throws XSenseApiException {
         try {
             return gson.fromJson(json, clazz);
-        } catch (JsonSyntaxException e) {
+        } catch (JsonParseException | ClassCastException | IllegalStateException | NumberFormatException e) {
             throw new XSenseApiException("Invalid JSON response", e);
         }
     }
@@ -539,7 +598,7 @@ public class XSenseApiClient {
     private <T> @Nullable T fromJson(JsonElement json, java.lang.reflect.Type type) throws XSenseApiException {
         try {
             return gson.fromJson(json, type);
-        } catch (JsonSyntaxException e) {
+        } catch (JsonParseException | ClassCastException | IllegalStateException | NumberFormatException e) {
             throw new XSenseApiException("Invalid JSON response", e);
         }
     }

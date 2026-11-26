@@ -108,8 +108,8 @@ public class XSenseStationHandler extends BaseBridgeHandler {
         properties.put(Thing.PROPERTY_VENDOR, "X-Sense");
         updateProperties(properties);
 
-        Integer onLine = station.onLine;
-        if (onLine != null && onLine == 1) {
+        boolean online = station.online() == 1;
+        if (online) {
             updateStatus(ThingStatus.ONLINE);
         } else {
             updateStatus(ThingStatusDetail.COMMUNICATION_ERROR, "@text/offline.station-offline");
@@ -119,7 +119,13 @@ public class XSenseStationHandler extends BaseBridgeHandler {
         for (Thing thing : getThing().getThings()) {
             ThingHandler handler = thing.getHandler();
             if (handler instanceof XSenseSensorHandler sensorHandler) {
-                sensorHandler.updateFromInventory(findDevice(devices, sensorHandler.getDeviceSn()));
+                if (online) {
+                    sensorHandler.updateFromInventory(findDevice(devices, sensorHandler.getDeviceSn()));
+                } else {
+                    // An offline station reports no child states; the children must stay offline
+                    // instead of being reset to UNKNOWN by every inventory poll
+                    sensorHandler.stationOffline();
+                }
             }
         }
     }

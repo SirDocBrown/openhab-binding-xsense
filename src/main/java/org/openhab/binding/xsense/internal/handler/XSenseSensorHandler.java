@@ -59,6 +59,9 @@ public class XSenseSensorHandler extends BaseThingHandler {
 
     // Written in initialize(), read via getDeviceSn() from the station handler's update path
     private volatile XSenseDeviceConfiguration config = new XSenseDeviceConfiguration();
+    // Set when the station explicitly reported the device as offline; only an explicit online report
+    // ends this state, as the station keeps old values of a disconnected device in its shadow
+    private volatile boolean reportedOffline;
 
     public XSenseSensorHandler(Thing thing) {
         super(thing);
@@ -114,6 +117,7 @@ public class XSenseSensorHandler extends BaseThingHandler {
      */
     public void updateFromInventory(@Nullable Device device) {
         if (device == null) {
+            reportedOffline = false;
             clearMeasurements();
             updateStatus(ThingStatusDetail.GONE, "@text/offline.device-not-found");
             return;
@@ -122,6 +126,12 @@ public class XSenseSensorHandler extends BaseThingHandler {
 
         XSenseDeviceState report = device.reported;
         if (report.online() == 0) {
+            reportedOffline = true;
+        } else if (report.online() == 1) {
+            reportedOffline = false;
+        }
+        if (reportedOffline) {
+            // Values delivered together with an offline flag are outdated and must not be published
             clearMeasurements();
             updateStatus(ThingStatusDetail.COMMUNICATION_ERROR, "@text/offline.sensor-offline");
             return;
@@ -154,6 +164,15 @@ public class XSenseSensorHandler extends BaseThingHandler {
             updateState(CHANNEL_MOTION, onOff(report.motion()));
         }
         updateStatus(report.online() == 1 ? ThingStatus.ONLINE : ThingStatus.UNKNOWN);
+    }
+
+    /**
+     * Called when the base station reports that it is offline: the station cannot deliver states of
+     * its children, so the sensor is offline as well and its measurements are undefined.
+     */
+    public void stationOffline() {
+        clearMeasurements();
+        updateStatus(ThingStatusDetail.BRIDGE_OFFLINE);
     }
 
     /**
