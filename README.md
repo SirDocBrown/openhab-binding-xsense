@@ -138,6 +138,19 @@ A sensor is `OFFLINE` when the base station explicitly reports it as disconnecte
 Values the station still delivers for such a sensor are outdated: its channels are set to `UNDEF` until the station reports the sensor online again.
 When the base station itself is offline, all its sensors are `OFFLINE` (bridge offline) with `UNDEF` channels.
 
+### Several Reports for One Device
+
+A base station may report a device more than once, e.g. in its device list and in a separate record keyed by the device id.
+The binding combines these records:
+
+- Records are assigned to a device only when their identifiers name exactly one device of the station; other records are ignored.
+- Values reported by only one record, or identically by several, are taken over.
+- Contradicting values: an offline report wins over an online report, and an alarm wins over "no alarm".
+  All other contradicting values become `UNDEF`.
+
+If several devices of a base station report the same serial number, the binding cannot tell their states apart.
+The thing configured with that serial number goes `OFFLINE` (configuration error) with `UNDEF` channels, and these devices are not offered in the inbox.
+
 ### Debug Log
 
 To analyze how the base station reports its devices, enable debug logging in the openHAB console:
@@ -146,7 +159,7 @@ To analyze how the base station reports its devices, enable debug logging in the
 log:set DEBUG org.openhab.binding.xsense
 ```
 
-For each poll the log contains one line per device with its model, the result and the names of expected fields that were not reported, e.g. `station <serial>, model XS01-M: missing rfLevel`.
+For each poll the log contains one line per device with its model, the result and the names of expected fields that were not reported or contradicted each other, e.g. `station <serial>, model XS01-M: missing rfLevel`.
 The reported device data itself is not logged.
 Restore the default level with `log:set INFO org.openhab.binding.xsense`.
 

@@ -12,7 +12,12 @@
  */
 package org.openhab.binding.xsense.internal.api;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.TreeSet;
 
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
@@ -75,7 +80,12 @@ public record XSenseDeviceState(int online, int alarm, int battery, int signal, 
         if ((device == null || !device.has("alarmStatus")) && (status == null || !status.has("alarmStatus"))) {
             alarm = alarmField(device, status, "isAlarm");
         }
+        // The peak value is reported in a "peak" object of the record or of its status object, or
+        // directly as field; the first form present is used
         int coPeak = field(child(device, "peak"), null, "coPpmPeak", MAX_CO_PPM);
+        if (coPeak < 0) {
+            coPeak = field(child(status, "peak"), null, "coPpmPeak", MAX_CO_PPM);
+        }
         if (coPeak < 0) {
             coPeak = field(device, status, "coPpmPeak", MAX_CO_PPM);
         }
@@ -137,23 +147,58 @@ public record XSenseDeviceState(int online, int alarm, int battery, int signal, 
         };
     }
 
+    /** Names of the record fields, in the order of {@link #values()}, used for diagnostics. */
+    static final List<String> FIELD_NAMES = List.of("online", "alarmStatus", "batInfo", "rfLevel", "coPpm", "coPpmPeak",
+            "isOpen", "isMoved");
+    private static final int FIELD_ONLINE = 0;
+    private static final int FIELD_ALARM = 1;
+
     /**
-     * Combines two records reported for the same device. Values present in only one record are
-     * taken over; when both records report a different value for the same field, the reports
-     * contradict each other and null is returned.
+     * Result of {@link #combine(List)}: the combined state and the names of the fields whose values
+     * contradicted each other.
      */
-    public static @Nullable XSenseDeviceState merge(XSenseDeviceState a, XSenseDeviceState b) {
-        int[] first = a.values();
-        int[] second = b.values();
-        int[] merged = new int[first.length];
-        for (int i = 0; i < first.length; i++) {
-            if (first[i] >= 0 && second[i] >= 0 && first[i] != second[i]) {
-                return null;
+    public record Combined(XSenseDeviceState state, List<String> conflicts) {
+    }
+
+    /**
+     * Combines all records reported for one device in one station report, field by field and
+     * independent of their order. A field reported by only one record, or with the same value by
+     * several records, is taken over. Contradicting values are resolved per field:
+     * <ul>
+     * <li>online: offline wins, so an explicitly offline device stays locked;</li>
+     * <li>alarm: the highest alarm code wins, so contradicting alarm reports never yield "no
+     * alarm";</li>
+     * <li>all other fields: unknown (-1). A conflict found once cannot be resolved by further
+     * records of the same report.</li>
+     * </ul>
+     */
+    public static Combined combine(List<XSenseDeviceState> records) {
+        int fieldCount = FIELD_NAMES.size();
+        int[] combined = new int[fieldCount];
+        List<String> conflicts = new ArrayList<>();
+        for (int field = 0; field < fieldCount; field++) {
+            Set<Integer> reported = new TreeSet<>();
+            for (XSenseDeviceState record : records) {
+                int value = record.values()[field];
+                if (value >= 0) {
+                    reported.add(value);
+                }
             }
-            merged[i] = first[i] >= 0 ? first[i] : second[i];
+            if (reported.isEmpty()) {
+                combined[field] = -1;
+            } else if (reported.size() == 1) {
+                combined[field] = reported.iterator().next();
+            } else {
+                conflicts.add(FIELD_NAMES.get(field));
+                combined[field] = switch (field) {
+                    case FIELD_ONLINE -> 0;
+                    case FIELD_ALARM -> Collections.max(reported);
+                    default -> -1;
+                };
+            }
         }
-        return new XSenseDeviceState(merged[0], merged[1], merged[2], merged[3], merged[4], merged[5], merged[6],
-                merged[7]);
+        return new Combined(new XSenseDeviceState(combined[0], combined[1], combined[2], combined[3], combined[4],
+                combined[5], combined[6], combined[7]), List.copyOf(conflicts));
     }
 
     private int[] values() {

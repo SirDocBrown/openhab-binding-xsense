@@ -97,6 +97,8 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     private volatile XSenseAccountConfiguration config = new XSenseAccountConfiguration();
     // Only accessed from the synchronized connect()/poll() methods
     private long retryDelay = RETRY_DELAY_MIN_SEC;
+    // Length of one retry delay unit (normally one second); shortened by tests
+    private final long retryUnitMillis;
 
     private volatile boolean disposed;
     private final AtomicBoolean refreshQueued = new AtomicBoolean();
@@ -112,9 +114,15 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     }
 
     XSenseAccountHandler(Bridge bridge, XSenseApiClient apiClient, IntSupplier defaultRefreshInterval) {
+        this(bridge, apiClient, defaultRefreshInterval, 1000);
+    }
+
+    XSenseAccountHandler(Bridge bridge, XSenseApiClient apiClient, IntSupplier defaultRefreshInterval,
+            long retryUnitMillis) {
         super(bridge);
         this.apiClient = apiClient;
         this.defaultRefreshInterval = defaultRefreshInterval;
+        this.retryUnitMillis = retryUnitMillis;
     }
 
     @Override
@@ -226,6 +234,14 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             apiClient.login(config.email, config.password);
             retryDelay = RETRY_DELAY_MIN_SEC;
             startPolling();
+        } catch (RuntimeException e) {
+            // Must not escape: the connect job would end without status and without a retry
+            logger.warn("{}: unexpected error during login: {}", logId, e.getClass().getSimpleName());
+            if (!disposed) {
+                updateStatus(ThingStatusDetail.COMMUNICATION_ERROR,
+                        statusText("offline.communication-error", e.getClass().getSimpleName()));
+                scheduleReconnect();
+            }
         } catch (XSenseApiException e) {
             logger.debug("{}: login failed: {}", logId, e.getMessage());
             if (disposed) {
@@ -369,7 +385,8 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
                 // Diagnosis without the device payload: model, assignment result and missing fields
                 String model = device.deviceType;
                 logger.debug("{}: station {}, model {}: {}", logId, serial, model,
-                        describe(state, result.conflictingDevices().contains(deviceSerial),
+                        describe(state, result.conflictingFields().getOrDefault(deviceSerial, List.of()),
+                                result.ambiguousSerials().contains(deviceSerial),
                                 model != null ? thingTypeForDeviceType(model) : null));
             }
         } catch (XSenseApiException e) {
@@ -381,12 +398,13 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     }
 
     /**
-     * Summarizes the report of one device for the debug log: the assignment result and the names of
-     * the fields the model is expected to report but did not.
+     * Summarizes the report of one device for the debug log: the assignment result, the names of
+     * the fields the model is expected to report but did not, and of contradicting fields.
      */
-    static String describe(@Nullable XSenseDeviceState state, boolean conflicting, @Nullable ThingTypeUID type) {
-        if (conflicting) {
-            return "contradicting records, ignored";
+    static String describe(@Nullable XSenseDeviceState state, List<String> conflicts, boolean ambiguousSerial,
+            @Nullable ThingTypeUID type) {
+        if (ambiguousSerial) {
+            return "serial number used by several devices of the station, ignored";
         }
         if (state == null) {
             return "no report";
@@ -394,8 +412,16 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
         if (state.online() == 0) {
             return "reported offline";
         }
-        List<String> missing = missingFields(state, type);
-        return missing.isEmpty() ? "complete" : "missing " + String.join(", ", missing);
+        List<String> missing = new ArrayList<>(missingFields(state, type));
+        missing.removeAll(conflicts);
+        List<String> parts = new ArrayList<>();
+        if (!missing.isEmpty()) {
+            parts.add("missing " + String.join(", ", missing));
+        }
+        if (!conflicts.isEmpty()) {
+            parts.add("contradicting " + String.join(", ", conflicts));
+        }
+        return parts.isEmpty() ? "complete" : String.join("; ", parts);
     }
 
     static List<String> missingFields(XSenseDeviceState state, @Nullable ThingTypeUID type) {
@@ -461,7 +487,7 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             return;
         }
         stopJob(reconnectJob);
-        ScheduledFuture<?> job = scheduler.schedule(this::connect, retryDelay, TimeUnit.SECONDS);
+        ScheduledFuture<?> job = scheduler.schedule(this::connect, retryDelay * retryUnitMillis, TimeUnit.MILLISECONDS);
         reconnectJob = job;
         if (disposed) {
             job.cancel(true);
@@ -476,6 +502,13 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
     private static String statusText(String key, @Nullable String argument) {
         String safeArgument = argument == null ? "" : argument.replace('"', '\'');
         return "@text/" + key + " [\"" + safeArgument + "\"]";
+    }
+
+    /**
+     * Returns the delay of the next reconnect attempt in retry units (seconds).
+     */
+    synchronized long nextRetryDelay() {
+        return retryDelay;
     }
 
     /**

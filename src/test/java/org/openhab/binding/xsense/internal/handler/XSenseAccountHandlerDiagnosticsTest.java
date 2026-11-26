@@ -32,16 +32,20 @@ class XSenseAccountHandlerDiagnosticsTest {
     @Test
     void describesResultAndMissingFieldsOnly() {
         assertEquals("complete",
-                XSenseAccountHandler.describe(new XSenseDeviceState(1, 0, 3, 2), false, THING_TYPE_SMOKE));
+                XSenseAccountHandler.describe(new XSenseDeviceState(1, 0, 3, 2), List.of(), false, THING_TYPE_SMOKE));
         assertEquals("missing rfLevel",
-                XSenseAccountHandler.describe(new XSenseDeviceState(1, 1, 3, -1), false, THING_TYPE_SMOKE));
+                XSenseAccountHandler.describe(new XSenseDeviceState(1, 1, 3, -1), List.of(), false, THING_TYPE_SMOKE));
         assertEquals("missing online, alarmStatus, batInfo, rfLevel",
-                XSenseAccountHandler.describe(XSenseDeviceState.UNKNOWN, false, THING_TYPE_SMOKE));
+                XSenseAccountHandler.describe(XSenseDeviceState.UNKNOWN, List.of(), false, THING_TYPE_SMOKE));
         assertEquals("reported offline",
-                XSenseAccountHandler.describe(new XSenseDeviceState(0, 1, 3, 3), false, THING_TYPE_SMOKE));
-        assertEquals("no report", XSenseAccountHandler.describe(null, false, THING_TYPE_SMOKE));
-        assertEquals("contradicting records, ignored",
-                XSenseAccountHandler.describe(new XSenseDeviceState(1, 1, 3, 3), true, THING_TYPE_SMOKE));
+                XSenseAccountHandler.describe(new XSenseDeviceState(0, 1, 3, 3), List.of(), false, THING_TYPE_SMOKE));
+        assertEquals("no report", XSenseAccountHandler.describe(null, List.of(), false, THING_TYPE_SMOKE));
+        assertEquals("contradicting rfLevel", XSenseAccountHandler.describe(new XSenseDeviceState(1, 1, 3, -1),
+                List.of("rfLevel"), false, THING_TYPE_SMOKE));
+        assertEquals("missing batInfo; contradicting rfLevel", XSenseAccountHandler
+                .describe(new XSenseDeviceState(1, 1, -1, -1), List.of("rfLevel"), false, THING_TYPE_SMOKE));
+        assertEquals("serial number used by several devices of the station, ignored",
+                XSenseAccountHandler.describe(null, List.of(), true, THING_TYPE_SMOKE));
     }
 
     @Test

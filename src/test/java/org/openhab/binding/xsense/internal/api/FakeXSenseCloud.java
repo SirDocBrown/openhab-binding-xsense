@@ -187,6 +187,30 @@ public class FakeXSenseCloud implements XSenseHttpTransport {
                 + stationOnline + ",\"devices\":[" + devices + "]}]}");
     }
 
+    /**
+     * Station list of {@link #HOUSE_ID} with one SBS50 and the given children as triples of
+     * deviceSn, deviceId and deviceType.
+     */
+    public static Response stationsWithModels(String stationOnline, String... children) {
+        StringBuilder devices = new StringBuilder();
+        for (int i = 0; i < children.length; i += 3) {
+            if (devices.length() > 0) {
+                devices.append(',');
+            }
+            devices.append("{\"deviceSn\":\"").append(children[i]).append("\",\"deviceId\":\"").append(children[i + 1])
+                    .append("\",\"deviceType\":\"").append(children[i + 2]).append("\",\"deviceName\":\"Detector\"}");
+        }
+        return api("{\"stations\":[{\"stationSn\":\"" + STATION_SN + "\",\"category\":\"SBS50\",\"onLine\":"
+                + stationOnline + ",\"devices\":[" + devices + "]}]}");
+    }
+
+    /** SRP challenge with the given raw JSON values for SRP_B, SALT and SECRET_BLOCK. */
+    public static Response srpChallenge(String srpBJson, String saltJson, String secretBlockJson) {
+        return ok("{\"ChallengeName\":\"PASSWORD_VERIFIER\",\"ChallengeParameters\":{\"USERNAME\":\"user-id-test\","
+                + "\"USER_ID_FOR_SRP\":\"user-id-test\",\"SALT\":" + saltJson + ",\"SRP_B\":" + srpBJson
+                + ",\"SECRET_BLOCK\":" + secretBlockJson + "}}");
+    }
+
     /** Station shadow document with the given "state.reported" object. */
     public static Response shadow(String reported) {
         return ok("{\"state\":{\"reported\":" + reported.strip() + "}}");

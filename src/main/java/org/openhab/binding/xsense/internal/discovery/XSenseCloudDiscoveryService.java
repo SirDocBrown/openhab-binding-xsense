@@ -24,6 +24,7 @@ import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.binding.xsense.internal.XSenseBindingConstants;
 import org.openhab.binding.xsense.internal.api.XSenseDtoUtil;
+import org.openhab.binding.xsense.internal.api.XSenseStationReport;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Device;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.House;
 import org.openhab.binding.xsense.internal.api.dto.XSenseApiDto.Station;
@@ -194,7 +195,7 @@ public class XSenseCloudDiscoveryService extends AbstractThingHandlerDiscoverySe
      * itself (see {@link #publishStation}) rather than gated behind the station thing being added,
      * so approving a home surfaces its whole station + sensor tree in one discovery step.
      */
-    private void publishDevices(Station station, ThingUID stationUID) {
+    void publishDevices(Station station, ThingUID stationUID) {
         String logId = "xsense-" + station.stationSn;
         List<Device> devices = station.devices;
         if (devices == null || devices.isEmpty()) {
@@ -202,10 +203,22 @@ public class XSenseCloudDiscoveryService extends AbstractThingHandlerDiscoverySe
             return;
         }
         logger.debug("{}: publishing {} device(s)", logId, devices.size());
+        Set<String> ambiguousSerials = XSenseStationReport.ambiguousSerials(devices);
         for (Device device : devices) {
             String deviceSn = device.deviceSn;
             String deviceType = device.deviceType;
             if (deviceSn == null || deviceType == null) {
+                continue;
+            }
+            if (ambiguousSerials.contains(deviceSn)) {
+                // The thing UID is derived from the serial number: devices sharing it would publish
+                // arbitrary, alternating data under the same UID, so none of them is published and
+                // a result published before is withdrawn
+                logger.debug("{}: serial number used by several devices of the station, not discovered", logId);
+                ThingTypeUID ambiguousType = XSenseBindingConstants.thingTypeForDeviceType(deviceType);
+                if (ambiguousType != null) {
+                    thingRemoved(new ThingUID(ambiguousType, stationUID, deviceSn));
+                }
                 continue;
             }
             ThingTypeUID thingTypeUID = XSenseBindingConstants.thingTypeForDeviceType(deviceType);

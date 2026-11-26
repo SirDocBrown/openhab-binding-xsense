@@ -417,6 +417,8 @@ public class XSenseApiClient {
                 challenge.put(key, value.getAsString());
             }
         }
+        // Validates the challenge before anything of it is taken over
+        Map<String, String> challengeResponses = srp.processChallenge(challenge, password);
         String userIdForSrp = challenge.get(XSenseCognitoSrp.PARAM_USER_ID_FOR_SRP);
         if (userIdForSrp != null) {
             cognitoUsername = userIdForSrp;
@@ -425,7 +427,7 @@ public class XSenseApiClient {
         JsonObject challengeRequest = new JsonObject();
         challengeRequest.addProperty("ChallengeName", "PASSWORD_VERIFIER");
         challengeRequest.addProperty("ClientId", clientId);
-        challengeRequest.add("ChallengeResponses", toJsonObject(srp.processChallenge(challenge, password)));
+        challengeRequest.add("ChallengeResponses", toJsonObject(challengeResponses));
         JsonObject challengeResponse = cognitoCall("RespondToAuthChallenge", challengeRequest);
 
         parseAuthenticationResult(getAsJsonObject(challengeResponse, "AuthenticationResult"));

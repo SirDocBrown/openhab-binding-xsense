@@ -177,6 +177,16 @@ public class XSenseSensorHandler extends BaseThingHandler {
     }
 
     /**
+     * Called when several children of the station inventory use the serial number configured for
+     * this thing: their values cannot be told apart, so none is published.
+     */
+    public void ambiguousDevice() {
+        reportedOffline = false;
+        clearMeasurements();
+        updateStatus(ThingStatusDetail.CONFIGURATION_ERROR, "@text/offline.device-ambiguous");
+    }
+
+    /**
      * Called when the base station reports that it is offline: the station cannot deliver states of
      * its children, so the sensor is offline as well and its measurements are undefined.
      */
