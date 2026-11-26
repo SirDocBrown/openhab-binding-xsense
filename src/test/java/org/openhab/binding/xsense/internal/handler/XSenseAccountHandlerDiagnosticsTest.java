@@ -47,7 +47,10 @@ class XSenseAccountHandlerDiagnosticsTest {
     @Test
     void expectsModelSpecificFields() {
         XSenseDeviceState basic = new XSenseDeviceState(1, 0, 3, 3);
-        assertEquals(List.of("coPpm", "coPpmPeak"), XSenseAccountHandler.missingFields(basic, THING_TYPE_CO));
+        // coPpmPeak is optional and never reported as missing
+        assertEquals(List.of("coPpm"), XSenseAccountHandler.missingFields(basic, THING_TYPE_CO));
+        assertEquals(List.of(),
+                XSenseAccountHandler.missingFields(new XSenseDeviceState(1, 0, 3, 3, 0, -1, -1, -1), THING_TYPE_CO));
         assertEquals(List.of("isOpen"),
                 XSenseAccountHandler.missingFields(new XSenseDeviceState(1, -1, 3, 3), THING_TYPE_DOOR));
         assertEquals(List.of("isMoved"),

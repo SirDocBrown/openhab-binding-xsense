@@ -18,6 +18,7 @@ import java.util.Set;
 import org.eclipse.jdt.annotation.NonNullByDefault;
 import org.eclipse.jdt.annotation.Nullable;
 import org.openhab.core.thing.ThingTypeUID;
+import org.openhab.core.thing.type.ChannelTypeUID;
 
 /**
  * The {@link XSenseBindingConstants} class defines common constants, which are
@@ -97,6 +98,8 @@ public class XSenseBindingConstants {
     public static final String CHANNEL_ALARM_HEAT = "alarm#heat";
     public static final String CHANNEL_CO_LEVEL = "measurement#co";
     public static final String CHANNEL_CO_PEAK = "measurement#coPeak";
+    // Added to a thing only when its detector reports a peak value, see XSenseSensorHandler
+    public static final ChannelTypeUID CHANNEL_TYPE_CO_PEAK = new ChannelTypeUID(BINDING_ID, "co-peak");
     public static final String CHANNEL_CONTACT = "state#contact";
     public static final String CHANNEL_MOTION = "state#motion";
     public static final String CHANNEL_BATTERY = "device#battery";

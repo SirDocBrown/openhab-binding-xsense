@@ -60,7 +60,7 @@
 		<description>Carbon monoxide concentration measured by the detector.</description>
 		<channels>
 			<channel id="co" typeId="co-level"/>
-			<channel id="coPeak" typeId="co-peak"/>
+			<!-- coPeak (type co-peak) is added by the handler when the detector reports a peak value -->
 		</channels>
 	</channel-group-type>
 

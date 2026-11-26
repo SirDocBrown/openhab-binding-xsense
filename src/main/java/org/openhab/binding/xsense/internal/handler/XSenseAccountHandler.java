@@ -414,11 +414,9 @@ public class XSenseAccountHandler extends BaseBridgeHandler {
             missing.add("rfLevel");
         }
         if (THING_TYPE_CO.equals(type) || THING_TYPE_COMBO.equals(type)) {
+            // coPpmPeak is optional, not every CO detector reports it
             if (state.coPpm() < 0) {
                 missing.add("coPpm");
-            }
-            if (state.coPeak() < 0) {
-                missing.add("coPpmPeak");
             }
         }
         if (THING_TYPE_DOOR.equals(type) && state.open() < 0) {
